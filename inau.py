@@ -260,9 +260,9 @@ def install(username, reponame, tag, destinations, itype):
     for server, hosts in destinations.items():
         repository = Repositories.query.with_parent(server.platform) \
                 .filter(Repositories.name == reponame) \
-                .first_or_404(description='Repository doesn\'t found')
+                .first_or_404(description='Repository not found. Check syntax.')
         build = Builds.query.with_parent(repository).filter(Builds.tag == tag) \
-                .first_or_404("Necessary builds isn't availables")
+                .first_or_404("Requested build not available. Check annotated tag.")
         try:
             with paramiko.SSHClient() as sshClient:
                 sshClient.set_missing_host_key_policy(paramiko.AutoAddPolicy())
