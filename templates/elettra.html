@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<!-- Required meta tags -->
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+		<!-- Bootstrap CSS -->
+		<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+			 integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T" crossorigin="anonymous">
+		<style>
+			body {
+				font-family: 'PT Sans Narrow', Arial, sans-serif;
+				font-size: 14px;
+			}
+		</style>
+		<title>INAU INstallazione AUtomatica</title>
+	</head>
+	<body>
+
+		<div class="container">
+			<div class="row">
+				<div class="col-12 center-block text-center">
+					<img src='http://www.elettra.eu/html/page/images/elettra.jpg'/>
+					<br><br><br><br>
+					<h4>INAU INstallazione AUtomatica</h4>
+					<br><br>
+				</div>
+			</div>
+
+			<div class="row">
+				<table class="table table-borderless">
+					<thead>
+						<tr>
+						{% for key, value in data[0].items() %}
+							<th scope="col">{{ key | e }}</th>
+						{% endfor %}
+						</tr>
+					</thead>
+					<tbody>
+						{% for row in data %}
+						<tr>
+							{% for key, value in row.items() %}
+							<td>{{ value | e }}</td>
+							{% endfor %}
+						</tr>
+						{% endfor %}
+					</tbody>
+				</table>
+			</div>
+
+			<br>
+			<div class="row">
+				<div class="col-12 center-block text-center">
+					<small>
+						<address>
+							<strong>Sincrotrone Trieste S.C.p.A.</strong><br>
+							Strada Statale 14 - km 163,5 in AREA Science Park<br>
+							34149 Basovizza, Trieste ITALY<br>
+							Tel. +39 040 37581 - Fax. +39 040 9380902<br>
+						</address>
+						<small>
+				</div>
+			</div>
+		</div>
+
+		<!-- Optional JavaScript -->
+		<!-- jQuery first, then Popper.js, then Bootstrap JS -->
+		<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"
+	  		integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"
+	  		integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1" crossorigin="anonymous"></script>
+		<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"
+	  		integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM" crossorigin="anonymous">
+		</script>
+	</body>
+</html>

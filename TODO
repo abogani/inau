@@ -1,0 +1,6 @@
+Aggiungere Neable/Disable flag per i repository ed implementare lo logica conseguente
+Rivedere /files sembra proprio sbagliata
+Testare server Python (con annessa la gestione di più file)
+Integrazione con system per l'avvio ed il riavvio automatico
+Rendere visibili (in sola lettura) le builds (e magari anche i relativi artifacts)
+Implementare mode=limit se necessario

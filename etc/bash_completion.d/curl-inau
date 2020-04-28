@@ -1,0 +1,90 @@
+function ispresent() {
+	for item in $2
+	do
+		if [ $item = $1 ]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+function _curl-inau()
+{
+	local h options dirname basename
+	h=inau.elettra.eu
+	dirname=$(dirname "${COMP_WORDS[COMP_CWORD]}")
+	basename=$(basename "${COMP_WORDS[COMP_CWORD]}")
+
+#	echo -e "\n$dirname#$basename"
+	case "$dirname#$basename" in
+		//$h/v2/cs/facilities/*/hosts/*/files#*)
+			local facility=$(basename $(dirname $(dirname $(dirname $dirname))))
+			local host=$(basename $(dirname $dirname))
+			local files="$(curl -s https://$h/v2/cs/facilities/$facility/hosts/$host/files | tail -n +3 | cut -d" " -f1)"
+			options="$(for elem in $files; do echo //$h/v2/cs/facilities/$facility/hosts/$host/files/$elem; done)"
+			;;
+		//$h/v2/cs/facilities/*/hosts/*#files)
+			local facility=$(basename $(dirname $(dirname $dirname)))
+			local host=$(basename $dirname)
+			local files="$(curl -s https://$h/v2/cs/facilities/$facility/hosts/$host/files | tail -n +3 | cut -d" " -f1)"
+			options="$(for elem in $files; do echo //$h/v2/cs/facilities/$facility/hosts/$host/files/$elem; done)"
+			;;
+		//$h/v2/cs/facilities/*/hosts/*#*)
+			local facility=$(basename $(dirname $(dirname $dirname)))
+			local host=$(basename $dirname)
+			options="//$h/v2/cs/facilities/$facility/hosts/$host/files
+				//$h/v2/cs/facilities/$facility/hosts/$host/installations"
+			;;
+		//$h/v2/cs/facilities/*/hosts#*)
+			local facility=$(basename $(dirname $dirname))
+			local hosts="$(curl -s https://$h/v2/cs/facilities/$facility/hosts | tail -n +3 | cut -d" " -f1)"
+			ispresent $basename "$hosts"
+			if [ $? -eq 0 ]; then
+				options="//$h/v2/cs/facilities/$facility/hosts/$basename/installations
+					//$h/v2/cs/facilities/$facility/hosts/$basename/files"
+			else
+				options="//$h/v2/cs/facilities/$facility/hosts/installations
+					$(for elem in $hosts; do echo //$h/v2/cs/facilities/$facility/hosts/$elem; done)"
+			fi;;
+
+		//$h/v2/cs/facilities/*#hosts)
+			local facility=$(basename $dirname)
+			local hosts="$(curl -s https://$h/v2/cs/facilities/$facility/hosts | tail -n +3 | cut -d" " -f1)"
+			options="//$h/v2/cs/facilities/$facility/hosts/installations
+				$(for elem in $hosts; do echo //$h/v2/cs/facilities/$facility/hosts/$elem; done)"
+			;;
+		//$h/v2/cs/facilities/*#*)
+			local facility=$(basename $dirname)
+			options="//$h/v2/cs/facilities/$facility/hosts
+				//$h/v2/cs/facilities/$facility/installations"
+			;;
+		//$h/v2/cs/facilities#*)
+			local facilities="$(curl -s https://$h/v2/cs/facilities | tail -n +3)"
+			ispresent $basename "$facilities"
+			if [ $? -eq 0 ]; then
+				options="//$h/v2/cs/facilities/$basename/hosts/
+					//$h/v2/cs/facilities/$basename/installations"
+			else
+				options="//$h/v2/cs/facilities/installations
+					$(for elem in $facilities; do echo //$h/v2/cs/facilities/$elem/; done)"
+			fi
+			;;
+		//$h/v2/cs#facilities)
+			local facilities="$(curl -s https://$h/v2/cs/facilities | tail -n +3)"
+			options="//$h/v2/cs/facilities/installations
+				$(for elem in $facilities; do echo //$h/v2/cs/facilities/$elem/; done)"
+			;;
+		//$h/v2#cs | //$h/v2/cs#*)
+			local subpaths="$(curl -s https://$h/v2/cs | tail -n +3)"
+			options="//$h/v2/cs/installations
+				$(for elem in $subpaths; do echo //$h/v2/cs/$elem/; done)"
+			;;
+		/#$h | //$h#* | //$h/v2#*)
+			options="//$h/v2/cs/"
+			;;
+
+	esac
+	COMPREPLY=($(compgen -W "${options}" -- "${COMP_WORDS[COMP_CWORD]}"))
+	compopt -o nospace
+}
+complete -F _curl-inau curl
