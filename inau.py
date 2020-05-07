@@ -1275,7 +1275,9 @@ def build():
                                 else:
                                     outcome = repo.name + " " + str(atag) + ": built failed on " + builder.name
                                 if not args.debug:
-                                    sendEmail([atag.tag.object.author.email], outcome, stderr)
+                                    sendEmail([atag.tag.tagger.email], outcome, stderr)
+                                    if str([atag.tag.tagger.email]) != str([atag.tag.object.author.email]):
+                                        sendEmail([atag.tag.object.author.email], outcome, stderr)
                                 else:
                                     sendEmailAdmins(outcome, stderr)
                 except Exception as e:
