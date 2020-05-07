@@ -1,6 +1,7 @@
 import logging
 import argparse
 import datetime
+import time
 import ldap
 import base64
 import json
@@ -1221,6 +1222,7 @@ def build():
                 try:
                     gitrepo, newAtags = updateRepo(Repositories.query \
                             .filter(Repositories.name == distinctRepo.name).first())
+                    time.sleep(5)
                     for atag in newAtags:
                         for repo in Repositories.query \
                                 .filter(Repositories.name == distinctRepo.name).all():
