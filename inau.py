@@ -35,7 +35,7 @@ parser.add_argument("--sender", default="noreply")
 parser.add_argument("--store", default="/scratch/build/files-store/")
 parser.add_argument("--repo", default="/scratch/build/repositories/")
 parser.add_argument("--ldap", default="ldap://abook.elettra.eu:389")
-parser.add_argument("--debug", action='store_true')
+parser.add_argument("--port", default="443")
 args = parser.parse_args()
 
 class Users(db.Model):
@@ -218,29 +218,30 @@ def execSyncedCommand(sshClient, cmd):
     return stdout.read().decode('utf-8'), stderr.read().decode('utf-8'), exitStatus
 
 def sendEmail(to, subject, body):
-    with SMTP(host=app.config['MAIL_SERVER'], port=25) as smtpClient:
-        sender = app.config['MAIL_DEFAULT_SENDER']
-        receivers = [ to ]
-        msg = MIMEText(str(body))
-        msg['Subject'] = "INAU. " + subject
-        msg['From'] = sender
-        msg['To'] = to[0]
-        smtpClient.sendmail(from_addr=sender, to_addrs=receivers,
-                msg=msg.as_string())
+    if args.port != "443":
+        print(subject, str(body))
+    else:
+        with SMTP(host=app.config['MAIL_SERVER'], port=25) as smtpClient:
+            sender = app.config['MAIL_DEFAULT_SENDER']
+            receivers = [ to ]
+            msg = MIMEText(str(body))
+            msg['Subject'] = "INAU. " + subject
+            msg['From'] = sender
+            msg['To'] = to[0]
+            smtpClient.sendmail(from_addr=sender, to_addrs=receivers,
+                    msg=msg.as_string())
 
 def sendEmailAdmins(subject, body):
     for admin in Users.query.filter(Users.admin == True).all():
         sendEmail([admin.name + "@" + app.config['MAIL_DOMAIN']], subject, body)
 
 def log_exception(sender, exception, **extra):
-    print(type(exception))
     if isinstance(exception, MethodNotAllowed) or isinstance(exception, BadRequest) or \
             isinstance(exception, UnprocessableEntity) or isinstance(exception, Forbidden):
         return
     sendEmailAdmins(str(sender), str(exception))
 
-if not args.debug:
-    got_request_exception.connect(log_exception, app)
+got_request_exception.connect(log_exception, app)
 
 class InstallationType(IntEnum):
     GLOBAL = 0,
@@ -1274,22 +1275,13 @@ def build():
                                             db.session.commit()
                                 else:
                                     outcome = repo.name + " " + str(atag) + ": built failed on " + builder.name
-                                if not args.debug:
-                                    sendEmail([atag.tag.tagger.email], outcome, stderr)
-                                    if str([atag.tag.tagger.email]) != str([atag.tag.object.author.email]):
-                                        sendEmail([atag.tag.object.author.email], outcome, stderr)
-                                else:
-                                    sendEmailAdmins(outcome, stderr)
+                                sendEmail([atag.tag.tagger.email], outcome, stderr)
+                                if str([atag.tag.tagger.email]) != str([atag.tag.object.author.email]):
+                                    sendEmail([atag.tag.object.author.email], outcome, stderr)
                 except Exception as e:
-                    if not args.debug:
-                        sendEmailAdmins("Error on " + distinctRepo.name + " repository", e)
-                    else:
-                        raise e
+                    sendEmailAdmins("Error on " + distinctRepo.name + " repository", e)
     except Exception as e:
-        if not args.debug:
-            sendEmailAdmins("Error on makefiles repository", e)
-        else:
-            raise e
+        sendEmailAdmins("Error on makefiles repository", e)
 
 
 if __name__ == '__main__':
@@ -1305,8 +1297,8 @@ if __name__ == '__main__':
     app.config['JOBS'] = [{'id': 'builder', 'func': build,
         'trigger': 'interval', 'seconds': 60}]
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.debug = args.debug
-    if app.debug:
+    if args.port != "443":
+        app.debug = True
         app.config['SQLALCHEMY_ECHO'] = True
 
     # Configure SQLAclhemy
@@ -1375,7 +1367,11 @@ if __name__ == '__main__':
             '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/installations/')
 
     # Start Flask (reloader is not compatible with APScheduler)
-    app.run(host='0.0.0.0', port=443, threaded=True,
-            ssl_context=('/etc/ssl/certs/inau_elettra_eu.crt',
-                '/etc/ssl/private/inau_elettra_eu.key'),
-            use_reloader=False, use_debugger=False)
+    if args.port != "443":
+        app.run(host='0.0.0.0', port=args.port, threaded=True,
+                use_reloader=False, use_debugger=False)
+    else:
+        app.run(host='0.0.0.0', port=args.port, threaded=True,
+                ssl_context=('/etc/ssl/certs/inau_elettra_eu.crt',
+                    '/etc/ssl/private/inau_elettra_eu.key'),
+                use_reloader=False, use_debugger=False)
