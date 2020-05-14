@@ -281,7 +281,8 @@ def install(username, reponame, tag, destinations, itype):
                                 if itype == InstallationType.GLOBAL or itype == InstallationType.FACILITY:
                                     cmd = "rm " + server.prefix + "/site/*/" + repository.destination + artifact.filename
                                     _, _, _ = execSyncedCommand(sshClient, cmd)
-                                    cmd = "test -d " + server.prefix + repository.destination + " || mkdir -p " + server.prefix + repository.destination
+                                    cmd = "install -d " + server.prefix + repository.destination \
+                                            + os.path.dirname(artifact.filename)
                                     _, _, _ = execSyncedCommand(sshClient, cmd)
                                     cmd = "install -m" + filemode + " /tmp/" + artifact.hash + " " \
                                             + server.prefix + repository.destination + artifact.filename
@@ -290,29 +291,14 @@ def install(username, reponame, tag, destinations, itype):
                                         raise Exception(stderr)
                                 else: # InstallationType.HOST
                                     for host in hosts:
-                                        cmd = "test -d " + server.prefix + "/site/" + host.name + "/" + repository.destination +\
-                                                " || mkdir -p " + server.prefix + "/site/" + host.name + "/" + repository.destination
+                                        cmd = "install -d " + server.prefix + "/site/" + host.name + "/" \
+                                                + repository.destination + os.path.dirname(artifact.filename)
                                         _, _, _ = execSyncedCommand(sshClient, cmd)
                                         cmd =  "install -m" + filemode + " /tmp/" + artifact.hash + " " + server.prefix \
                                             + "/site/" + host.name  + "/" + repository.destination + artifact.filename
                                         _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
                                         if exitStatus != 0:
                                             raise Exception(stderr)
-                    if repository.type == RepositoryType.python:
-                        cmd = ""
-                        mainClassFile = ""
-                        for elem in repository.name.split('-'):
-                            mainClassFile += elem[0].upper() + elem[1:]
-                        if itype == InstallationType.GLOBAL or itype == InstallationType.FACILITY:
-                            cmd = "cd " + server.prefix + repository.destination
-                        else: # InstallationType.HOST
-                            cmd = "cd " + server.prefix + "/site/" + host.name + "/" + repository.destination
-                        cmd += "/.. && ln -sf " + repository.name + "/" + mainClassFile + ".py " + repository.name + "-srv"
-                        _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
-                        if exitStatus != 0:
-                            raise Exception(stderr)
-
-
         except Exception as e:
             raise InternalServerError(description=str(e))
 
@@ -1210,6 +1196,7 @@ def updateRepo(repo):
         gitrepo.remotes.origin.fetch()
     else:
         gitrepo = git.Repo.clone_from(repo.provider.url + repo.name, to_path=repoPath)
+    gitrepo.submodule_update(recursive=True, init=True, force_reset=True)
     atagsAfter = set()
     atagsAfter = retrieveAnnotatedTags(gitrepo)
     return gitrepo, atagsAfter - atagsBefore
@@ -1257,26 +1244,30 @@ def build():
 
                                     print("Looking for file(s) in " + dir + "...")
 
-                                    for r, d, f in os.walk(app.config['GIT_TREES_DIR'] + repo.name + dir):
+                                    basedir = app.config['GIT_TREES_DIR'] + repo.name + dir
+                                    for r, d, f in os.walk(basedir):
+                                        dir = ""
+                                        if r != basedir:
+                                            dir = os.path.basename(r) + "/"
                                         for file in f:
                                             hashFile = ""
-                                            print("Copy " + app.config['GIT_TREES_DIR'] + repo.name + dir
-                                                    + file + " in /tmp/" + file + "...")
-                                            shutil.copyfile(app.config['GIT_TREES_DIR'] + repo.name + dir
-                                                    + file, "/tmp/" + file)
+                                            print("Copy " + basedir + dir + file + " in /tmp/" + file + "...")
+                                            shutil.copyfile(basedir + dir + file, "/tmp/" + file)
                                             with open("/tmp/" + file,"rb") as fd:
                                                 bytes = fd.read()
                                                 hashFile = hashlib.sha256(bytes).hexdigest();
                                                 os.rename("/tmp/" + file, "/tmp/" + hashFile)
                                             if not os.path.isfile(app.config['FILES_STORE_DIR'] + hashFile):
                                                 shutil.copyfile("/tmp/" + hashFile, app.config['FILES_STORE_DIR'] + hashFile)
-                                            artifact = Artifacts(build_id=build.id, hash=hashFile, filename=file) 
+                                            artifact = Artifacts(build_id=build.id, hash=hashFile, filename=dir+file)
                                             db.session.add(artifact)
                                             db.session.commit()
                                 else:
                                     outcome = repo.name + " " + str(atag) + ": built failed on " + builder.name
+                                print("Send email to", atag.tag.tagger.email)
                                 sendEmail([atag.tag.tagger.email], outcome, stderr)
                                 if str([atag.tag.tagger.email]) != str([atag.tag.object.author.email]):
+                                    print("Send email to", atag.tag.object.author.email)
                                     sendEmail([atag.tag.object.author.email], outcome, stderr)
                 except Exception as e:
                     sendEmailAdmins("Error on " + distinctRepo.name + " repository", e)
@@ -1295,7 +1286,7 @@ if __name__ == '__main__':
     app.config['LDAP_URL'] = args.ldap
     app.config['BUNDLE_ERRORS'] = True
     app.config['JOBS'] = [{'id': 'builder', 'func': build,
-        'trigger': 'interval', 'seconds': 60}]
+        'trigger': 'interval', 'seconds': 300}]
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     if args.port != "443":
         app.debug = True

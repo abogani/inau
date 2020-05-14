@@ -1,6 +1,5 @@
-Aggiungere Neable/Disable flag per i repository ed implementare lo logica conseguente
-Rivedere /files sembra proprio sbagliata
-Testare server Python (con annessa la gestione di più file)
-Integrazione con system per l'avvio ed il riavvio automatico
+Aggiungere Enable/Disable flag per i repository ed implementare lo logica conseguente
+Rivedere /files (sembra proprio sbagliata) ed aggiungere non solo quanto supposto sia installato ma anche quando realmente presente
+Integrazione con systemd per l'avvio ed il riavvio automatico (dopo che si e' riusciti a rediriggere tutto l'output in syslog/journald)
 Rendere visibili (in sola lettura) le builds (e magari anche i relativi artifacts)
 Implementare mode=limit se necessario
