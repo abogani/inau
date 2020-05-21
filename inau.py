@@ -581,12 +581,12 @@ class BuilderHandler(Resource):
         builder.platform = plat
         db.session.commit()
         return builder, 201
-    def delete(self, buildername):
-        builder = Builders.query.filter(Builders.name == buildername).first_or_404()
-        authenticate(AuthenticationType.ADMIN, request)
-        db.session.delete(builder)
-        db.session.commit()
-        return {}, 204
+#    def delete(self, buildername):
+#        builder = Builders.query.filter(Builders.name == buildername).first_or_404()
+#        authenticate(AuthenticationType.ADMIN, request)
+#        db.session.delete(builder)
+#        db.session.commit()
+#        return {}, 204
 
 servers_fields = { 'name': fields.String(), 'prefix': fields.String(),
         'distribution': fields.String(attribute='platform.distribution.name'),
