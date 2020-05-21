@@ -1210,7 +1210,7 @@ def build():
                 try:
                     gitrepo, newAtags = updateRepo(Repositories.query \
                             .filter(Repositories.name == distinctRepo.name).first())
-                    time.sleep(5)
+                    time.sleep(1)
                     for atag in newAtags:
                         for repo in Repositories.query \
                                 .filter(Repositories.name == distinctRepo.name).all():
