@@ -79,7 +79,6 @@ CREATE TABLE `builders` (
   `platform_id` int(11) NOT NULL,
   `name` varchar(255) NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `name` (`name`),
   KEY `platform_id` (`platform_id`),
   CONSTRAINT `builders_ibfk_1` FOREIGN KEY (`platform_id`) REFERENCES `platforms` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=latin1;
