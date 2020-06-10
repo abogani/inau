@@ -268,6 +268,7 @@ def install(username, reponame, tag, destinations, itype):
         try:
             with paramiko.SSHClient() as sshClient:
                 sshClient.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                print("Connect to " + server.name + "...") 
                 sshClient.connect(hostname=server.name, port=22, username="root",
                         key_filename="/home/inau/.ssh/id_rsa.pub")
                 with sshClient.open_sftp() as sftpClient:
