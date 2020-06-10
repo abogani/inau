@@ -1253,14 +1253,12 @@ def build():
                                             dir = os.path.basename(r) + "/"
                                         for file in f:
                                             hashFile = ""
-                                            print("Copy " + basedir + dir + file + " in /tmp/" + file + "...")
-                                            shutil.copyfile(basedir + dir + file, "/tmp/" + file)
-                                            with open("/tmp/" + file,"rb") as fd:
+                                            with open(basedir + dir + file,"rb") as fd:
                                                 bytes = fd.read()
                                                 hashFile = hashlib.sha256(bytes).hexdigest();
-                                                os.rename("/tmp/" + file, "/tmp/" + hashFile)
-                                            if not os.path.isfile(app.config['FILES_STORE_DIR'] + hashFile):
-                                                shutil.copyfile("/tmp/" + hashFile, app.config['FILES_STORE_DIR'] + hashFile)
+                                                if not os.path.isfile(app.config['FILES_STORE_DIR'] + hashFile):
+                                                    print("Install " + basedir + dir + file + " in the file-store as " + hashFile + "...")
+                                                    shutil.copyfile(basedir + dir + file, app.config['FILES_STORE_DIR'] + hashFile, follow_symlinks=False)
                                             artifact = Artifacts(build_id=build.id, hash=hashFile, filename=dir+file)
                                             db.session.add(artifact)
                                             db.session.commit()
