@@ -1195,9 +1195,10 @@ def updateRepo(repo):
         gitrepo = git.Repo(repoPath)
         atagsBefore = retrieveAnnotatedTags(gitrepo)
         gitrepo.remotes.origin.fetch()
+        gitrepo.submodule_update(recursive=True, init=False, force_reset=True)
     else:
         gitrepo = git.Repo.clone_from(repo.provider.url + repo.name, to_path=repoPath)
-    gitrepo.submodule_update(recursive=True, init=True, force_reset=True)
+        gitrepo.submodule_update(recursive=True, init=True, force_reset=False)
     atagsAfter = set()
     atagsAfter = retrieveAnnotatedTags(gitrepo)
     return gitrepo, atagsAfter - atagsBefore
