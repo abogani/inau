@@ -135,9 +135,9 @@ def authenticate(authtype, request):
     username, password = base64.b64decode(split[1]).decode().split(':', 1)
     user = Users.query.filter(Users.name == username).first()
     if user is None:
-            raise Forbidden()
+        raise Forbidden()
     if authtype == AuthenticationType.ADMIN and user.admin is False:
-            raise Forbidden()
+        raise Forbidden()
     try:
         auth.simple_bind_s(username, password)
         auth.unbind_s()
