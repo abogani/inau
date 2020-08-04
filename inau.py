@@ -29,12 +29,12 @@ db = SQLAlchemy()
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--db", required=True)
-parser.add_argument("--smtpserver", default="smtp.elettra.eu")
 parser.add_argument("--smtpdomain", default="elettra.eu")
-parser.add_argument("--sender", default="noreply")
+parser.add_argument("--smtpserver", default="smtp.elettra.eu")
+parser.add_argument("--smtpsender", default="noreply")
 parser.add_argument("--store", default="/scratch/build/files-store/")
 parser.add_argument("--repo", default="/scratch/build/repositories/")
-parser.add_argument("--ldap", default="ldap://abook.elettra.eu:389")
+parser.add_argument("--ldap", default="ldaps://abook.elettra.eu:636")
 parser.add_argument("--port", default="443")
 args = parser.parse_args()
 
@@ -139,7 +139,7 @@ def authenticate(authtype, request):
     if authtype == AuthenticationType.ADMIN and user.admin is False:
         raise Forbidden()
     try:
-        auth.simple_bind_s(username, password)
+        auth.simple_bind_s("uid=" + username +",ou=people,dc=elettra,dc=eu", password)
         auth.unbind_s()
     except:
         raise Forbidden()
@@ -1206,10 +1206,12 @@ def updateRepo(repo):
 def build():
     try:
         with db.app.app_context():
+            print("Checking makefiles repository for updates...") 
             updateRepo(Repositories.query.filter(Repositories.name == "makefiles").first())
             for distinctRepo in Repositories.query.with_entities(Repositories.name) \
                     .filter(Repositories.name != "makefiles").distinct().all():
                 try:
+                    print("Checking " + distinctRepo.name  + " repository for updates... ") 
                     gitrepo, newAtags = updateRepo(Repositories.query \
                             .filter(Repositories.name == distinctRepo.name).first())
                     time.sleep(1)
@@ -1220,17 +1222,21 @@ def build():
                                     .filter(Builders.platform_id == repo.platform.id).first()
                             if builder is None:
                                 raise Exception("Missing builder")
-                            print("Start building " + str(atag) + " from " + repo.name 
-                                    + " git repo on " + builder.name + "...")
+                            print("Resetting reporitory " + repo.name + "...") 
                             gitrepo.git.checkout(str(atag))
                             gitrepo.git.clean("-fdx")
+                            print("SSH-ing to builder " + builder.name + "...")
                             with paramiko.SSHClient() as sshClient:
                                 sshClient.set_missing_host_key_policy(paramiko.AutoAddPolicy())
                                 sshClient.connect(hostname=builder.name, port=22, username="inau",
                                         key_filename="/home/inau/.ssh/id_rsa.pub")
+                                print("Start building " + str(atag) + " from " + repo.name 
+                                        + " git repo on " + builder.name + "...")
                                 _, stderr, exitStatus = execSyncedCommand(sshClient,
                                         "source /etc/profile; cd " + app.config['GIT_TREES_DIR'] + repo.name + 
                                         "&& (test -f *.pro && qmake && cuuimake --plain-text-output); make")
+                                print("Building " + str(atag) + " from " + repo.name 
+                                        + " git repo on " + builder.name + " finished with code: " + str(exitStatus))
                                 if exitStatus == 0:
                                     outcome = repo.name + " " + str(atag) + ": built successfully on " + builder.name
                                     build = Builds(repository_id=repo.id, tag=str(atag)) 
@@ -1270,8 +1276,10 @@ def build():
                                     print("Send email to", atag.tag.object.author.email)
                                     sendEmail([atag.tag.object.author.email], outcome, stderr)
                 except Exception as e:
+                    print("Error on " + distinctRepo.name + " repository: ", e)
                     sendEmailAdmins("Error on " + distinctRepo.name + " repository", e)
     except Exception as e:
+        printf("Error on makefiles repository: ", e)
         sendEmailAdmins("Error on makefiles repository", e)
 
 
@@ -1280,13 +1288,13 @@ if __name__ == '__main__':
     app.config['SQLALCHEMY_DATABASE_URI'] = args.db
     app.config['MAIL_SERVER'] = args.smtpserver
     app.config['MAIL_DOMAIN'] = args.smtpdomain
-    app.config['MAIL_DEFAULT_SENDER'] = args.sender + "@" + args.smtpdomain
+    app.config['MAIL_DEFAULT_SENDER'] = args.smtpsender + "@" + args.smtpdomain
     app.config['FILES_STORE_DIR'] = args.store
     app.config['GIT_TREES_DIR'] = args.repo
     app.config['LDAP_URL'] = args.ldap
     app.config['BUNDLE_ERRORS'] = True
     app.config['JOBS'] = [{'id': 'builder', 'func': build,
-        'trigger': 'interval', 'seconds': 300}]
+        'trigger': 'interval', 'seconds': 60}]
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     if args.port != "443":
         app.debug = True
