@@ -130,18 +130,22 @@ class AuthenticationType(Enum):
 def authenticate(authtype, request):
     auth = ldap.initialize(app.config['LDAP_URL'], bytes_mode=False)
     if request.headers.get('Authorization') == None:
+        print("Missing authorization header")
         raise Unauthorized()
     split = request.headers.get('Authorization').strip().split(' ')
     username, password = base64.b64decode(split[1]).decode().split(':', 1)
     user = Users.query.filter(Users.name == username).first()
     if user is None:
+        print("User isn't enabled")
         raise Forbidden()
     if authtype == AuthenticationType.ADMIN and user.admin is False:
+        print("Admin authentication type is required")
         raise Forbidden()
     try:
         auth.simple_bind_s("uid=" + username +",ou=people,dc=elettra,dc=eu", password)
         auth.unbind_s()
-    except:
+    except Exception as e:
+        print("LDAP issue: ", e)
         raise Forbidden()
     return username
 
