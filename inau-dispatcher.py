@@ -12,6 +12,7 @@ import sys
 import logging
 import logging.handlers
 import argparse
+import datetime
 import subprocess
 import paramiko
 import hashlib
@@ -145,11 +146,11 @@ class Builder:
                             else:
                                 raiseException('Invalid type')
 
+                            artifacts = []
                             for r, d, f in os.walk(basedir):
                                 dir = ""
                                 if r != basedir:
                                     dir = os.path.basename(r) + "/"
-                                artifacts = []
                                 for file in f:
                                     hashFile = ""
                                     with open(basedir + dir + file,"rb") as fd:
@@ -157,9 +158,9 @@ class Builder:
                                         hashFile = hashlib.sha256(bytes).hexdigest();
                                         if not os.path.isfile(args.store + hashFile):
                                             shutil.copyfile(basedir + dir + file, args.store + hashFile, follow_symlinks=False)
-                                    artifacts.append(db.Artifacts(build_id=job.build_id, hash=hashFile, filename=dir+file))
-                                session.add_all(artifacts)
-                                session.commit()
+                                        artifacts.append(db.Artifacts(build_id=job.build_id, hash=hashFile, filename=dir+file))
+                            session.add_all(artifacts)
+                            session.commit()
 
                     sendEmail(session, job.emails, outcome, output)
 
@@ -310,7 +311,7 @@ class Server(BaseHTTPRequestHandler):
                 session.close()
                 return
 
-            builds.append(db.Builds(repository_id=r.id, platform_id=r.platform_id, tag=post_json['ref']))
+            builds.append(db.Builds(repository_id=r.id, platform_id=r.platform_id, tag=os.path.basename(post_json['ref'])))
                
         if not builds:
             self.send_response(404)
