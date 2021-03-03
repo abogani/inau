@@ -1,6 +1,6 @@
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, func
-#from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship
 from enum import Enum, IntEnum
 import datetime
 
@@ -17,22 +17,22 @@ class Architectures(Base):
     __tablename__ = 'architectures'
     id = Column(Integer, primary_key=True)
     name = Column(String(255), unique=True, nullable=False)
-#    platforms = relationship('Platforms', back_populates='architecture')
+    platforms = relationship('Platforms', back_populates='architecture')
 
 class Distributions(Base):
     __tablename__ = 'distributions'
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     version = Column(String(255), nullable=False)
-#    platforms = relationship('Platforms', back_populates='distribution')
-#
+    platforms = relationship('Platforms', back_populates='distribution')
+
 class Platforms(Base):
     __tablename__ = 'platforms'
     id = Column(Integer, primary_key=True)
     distribution_id = Column(Integer, ForeignKey('distributions.id'), nullable=False)
     architecture_id = Column(Integer, ForeignKey('architectures.id'), nullable=False)
-#    architecture = relationship('Architectures', back_populates='platforms')
-#    distribution = relationship('Distributions', back_populates='platforms')
+    architecture = relationship('Architectures', back_populates='platforms')
+    distribution = relationship('Distributions', back_populates='platforms')
 #    servers = relationship('Servers', back_populates='platform')
 #
 #class Facilities(Base):
