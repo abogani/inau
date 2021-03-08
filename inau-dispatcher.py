@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from http import HTTPStatus
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, exc
 from multiprocessing import Process, Queue
@@ -291,7 +292,7 @@ class Server(BaseHTTPRequestHandler):
             post_data = self.rfile.read(content_length)
 
             if self.headers['Content-Type'] != 'application/json':
-                self.send_response(415)
+                self.send_response(HTTPStatus.UNSUPPORTED_MEDIA_TYPE.value)
                 self.end_headers()
                 return
 
@@ -300,13 +301,13 @@ class Server(BaseHTTPRequestHandler):
 
             # Tag deletion
             if post_json['after'] == '0000000000000000000000000000000000000000':
-                self.send_response(200)
+                self.send_response(HTTPStatus.OK.value)
                 self.end_headers()
                 return
 
             # Check if the tag is lightweight
             if post_json['after'] == post_json['commits'][0]['id']:
-                self.send_response(200)
+                self.send_response(HTTPStatus.OK.value)
                 self.end_headers()
                 return
 
@@ -328,14 +329,14 @@ class Server(BaseHTTPRequestHandler):
 #            req = requests.post('https://gitlab.elettra.eu/api/v4/projects/' + urllib.parse.quote(rn, safe='') 
 #                    + '/protected_tags?name=' + post_json['ref'] + '&create_access_level=40')
 
-            self.send_response(200)
+            self.send_response(HTTPStatus.OK.value)
             self.end_headers()
 
         except Exception as e:
             sendEmailAdmins("Receive new tag failed", str(e))
             logger.error("Receive new tag failed: ", str(e))
             session.rollback()
-            self.send_response(500)
+            self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR.value)
             self.end_headers()
         finally:
             session.close()
