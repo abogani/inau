@@ -2,6 +2,7 @@
 
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from http import HTTPStatus
+import ssl
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, exc
 from multiprocessing import Process, Queue
@@ -313,9 +314,9 @@ class Server(BaseHTTPRequestHandler):
 
             for r in session.query(db.Repositories).filter(db.Repositories.name==post_json['project']['path_with_namespace']).all():
                 if r.name == "cs/ds/makefiles" and self.headers['X-Gitlab-Event'] == 'Push Hook' and post_json['event_name'] == 'push':
-                    job = Update(repository_name = r.name, repository_url = post_json['project']['http_url'], build_tag=post_json['ref'])
+                    job = Update(repository_name = r.name, repository_url = post_json['project']['ssh_url'], build_tag=post_json['ref'])
                 elif self.headers['X-Gitlab-Event'] == 'Tag Push Hook' and post_json['event_name'] == 'tag_push':
-                    job = Store(repository_name = r.name, repository_url = post_json['project']['http_url'], build_tag=post_json['ref'],
+                    job = Store(repository_name = r.name, repository_url = post_json['project']['ssh_url'], build_tag=post_json['ref'],
                             repository_id = r.id, repository_type = r.type, emails=[post_json['commits'][0]['author']['email'], post_json['user_email']])
                 else:
                     continue
@@ -324,10 +325,6 @@ class Server(BaseHTTPRequestHandler):
                 idx = allbuilders[r.platform_id].index(min(allbuilders[r.platform_id], 
                     key=lambda x:x.queue.qsize()))
                 allbuilders[r.platform_id][idx].queue.put(job)
-
-# TODO Enable protected_tags
-#            req = requests.post('https://gitlab.elettra.eu/api/v4/projects/' + urllib.parse.quote(rn, safe='') 
-#                    + '/protected_tags?name=' + post_json['ref'] + '&create_access_level=40')
 
             self.send_response(HTTPStatus.OK.value)
             self.end_headers()
@@ -346,6 +343,8 @@ def run(address, port, server_class=HTTPServer, handler_class=Server):
     logger.info('Starting...')
     server_address = (address, port)
     httpd = server_class(server_address, handler_class)
+#    httpd.socket = ssl.wrap_socket (httpd.socket, keyfile="/etc/ssl/private/inau_elettra_eu.key",
+#            certfile="/etc/ssl/certs/inau_elettra_eu.crt", server_side=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
