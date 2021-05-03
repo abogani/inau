@@ -11,7 +11,7 @@ import hashlib
 import os
 import git
 from enum import Enum, IntEnum
-from werkzeug.exceptions import HTTPException, Unauthorized, Forbidden, InternalServerError, MethodNotAllowed, BadRequest, UnprocessableEntity
+from werkzeug.exceptions import HTTPException, Unauthorized, Forbidden, InternalServerError, MethodNotAllowed, BadRequest, UnprocessableEntity, NotFound
 from smtplib import SMTP
 from email.mime.text import MIMEText
 from flask import Flask, request, make_response, got_request_exception, render_template
@@ -267,6 +267,8 @@ def install(username, reponame, tag, destinations, itype):
     retval = []
     user = Users.query.filter(Users.name == username) \
             .first_or_404(description='User not found')
+    if not destinations.items():
+        raise NotFound
     for server, hosts in destinations.items():
         repository = Repositories.query.with_parent(server.platform) \
                 .filter(Repositories.name == reponame) \
@@ -927,6 +929,7 @@ class HostHandler(Resource):
         db.session.commit()
         return {}, 204
 
+
 files_fields = { 'filename': fields.String() }
 class FilesHandler(Resource):
     @marshal_with(files_fields)
@@ -935,11 +938,13 @@ class FilesHandler(Resource):
                 filter(Facilities.name == facilityname,
                         Hosts.name == hostname).\
                 first_or_404()
-        LatestInstallations = Builds.query.join('repository').join('installations').\
-                with_entities(Repositories.id, Installations.host_id,
-                        func.max(Installations.id).label('installation_id')).\
-                group_by(Repositories.id, Installations.host_id).\
-                subquery()
+        LatestInstallations = db.session.query(Installations)\
+                .with_entities(Repositories.id, Installations.host_id,\
+                    func.max(Installations.id).label('installation_id'))\
+                .select_from(Installations)\
+                .join(Builds).join(Repositories)\
+                .group_by(Repositories.id, Installations.host_id)\
+                .subquery()
         retval = []
         for artifact in Builds.query.join('installations').join('artifacts').\
                 join(LatestInstallations, Installations.id == LatestInstallations.c.installation_id).\
@@ -955,11 +960,13 @@ class FileHandler(Resource):
                 filter(Facilities.name == facilityname,
                         Hosts.name == hostname).\
                 first_or_404()
-        LatestInstallations = Builds.query.join('repository').join('installations').\
-                with_entities(Repositories.id, Installations.host_id,
-                        func.max(Installations.id).label('installation_id')).\
-                group_by(Repositories.id, Installations.host_id).\
-                subquery()
+        LatestInstallations = db.session.query(Installations)\
+                .with_entities(Repositories.id, Installations.host_id,\
+                    func.max(Installations.id).label('installation_id'))\
+                .select_from(Installations)\
+                .join(Builds).join(Repositories)\
+                .group_by(Repositories.id, Installations.host_id)\
+                .subquery()
         artifact = Builds.query.\
                 join('installations').\
                 join('artifacts').\
@@ -981,11 +988,13 @@ class CSInstallationsHandler(Resource):
     @marshal_with(cs_installations_fields)
     def get(self):
         args = mode_parser.parse_args(strict=True)
-        LatestInstallations = Builds.query.join('repository').join('installations').\
-                with_entities(Repositories.id, Installations.host_id,
-                        func.max(Installations.id).label('installation_id')).\
-                group_by(Repositories.id, Installations.host_id).\
-                subquery()
+        LatestInstallations = db.session.query(Installations)\
+                .with_entities(Repositories.id, Installations.host_id,\
+                    func.max(Installations.id).label('installation_id'))\
+                .select_from(Installations)\
+                .join(Builds).join(Repositories)\
+                .group_by(Repositories.id, Installations.host_id)\
+                .subquery()
         if args['mode'] == 'status':
             installations = Installations.query.options(
                     joinedload('user', innerjoin=True),\
@@ -1053,11 +1062,13 @@ class FacilityInstallationsHandler(Resource):
                 filter(Facilities.name == facilityname).\
                 first_or_404()
         args = mode_parser.parse_args(strict=True)
-        LatestInstallations = Builds.query.join('repository').join('installations').\
-                with_entities(Repositories.id, Installations.host_id,
-                        func.max(Installations.id).label('installation_id')).\
-                group_by(Repositories.id, Installations.host_id).\
-                subquery()
+        LatestInstallations = db.session.query(Installations)\
+                .with_entities(Repositories.id, Installations.host_id,\
+                    func.max(Installations.id).label('installation_id'))\
+                .select_from(Installations)\
+                .join(Builds).join(Repositories)\
+                .group_by(Repositories.id, Installations.host_id)\
+                .subquery()
         if args['mode'] == 'status':
             installations = Installations.query.options(
                     joinedload('user', innerjoin=True),\
@@ -1132,11 +1143,13 @@ class HostInstallationsHandler(Resource):
                         Hosts.name == hostname).\
                 first_or_404()
         args = mode_parser.parse_args(strict=True)
-        LatestInstallations = Builds.query.join('repository').join('installations').\
-                with_entities(Repositories.id, Installations.host_id,
-                        func.max(Installations.id).label('installation_id')).\
-                group_by(Repositories.id, Installations.host_id).\
-                subquery()
+        LatestInstallations = db.session.query(Installations)\
+                .with_entities(Repositories.id, Installations.host_id,\
+                    func.max(Installations.id).label('installation_id'))\
+                .select_from(Installations)\
+                .join(Builds).join(Repositories)\
+                .group_by(Repositories.id, Installations.host_id)\
+                .subquery()
         if args['mode'] == 'status':
             installations = Installations.query.options(
                     joinedload('user', innerjoin=True),\
@@ -1319,9 +1332,9 @@ if __name__ == '__main__':
     db.init_app(app)
 
     # Create and configure APScheduler
-    sched = APScheduler()
-    sched.init_app(app)
-    sched.start()
+#    sched = APScheduler()
+#    sched.init_app(app)
+#    sched.start()
 
     # Create all DB tables if necessary
     db.create_all()

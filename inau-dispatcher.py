@@ -180,11 +180,11 @@ class Builder:
             except subprocess.CalledProcessError as c:
                 sendEmailAdmins("Subprocess failed", str(c))
                 logger.error("Subprocess failed: ", str(c))
-                session.rollback()
+                self.session.rollback()
             except Exception as e:
                 sendEmailAdmins("Generic error", str(e))
                 logger.error("Generic error: ", str(e))
-                session.rollback()
+                self.session.rollback()
             except KeyboardInterrupt as k:
                 self.session.rollback()
                 break
@@ -313,9 +313,7 @@ class Server(BaseHTTPRequestHandler):
                 return
 
             for r in session.query(db.Repositories).filter(db.Repositories.name==post_json['project']['path_with_namespace']).all():
-                if r.name == "cs/ds/makefiles" and self.headers['X-Gitlab-Event'] == 'Push Hook' and post_json['event_name'] == 'push':
-                    job = Update(repository_name = r.name, repository_url = post_json['project']['ssh_url'], build_tag=post_json['ref'])
-                elif self.headers['X-Gitlab-Event'] == 'Tag Push Hook' and post_json['event_name'] == 'tag_push':
+                if self.headers['X-Gitlab-Event'] == 'Tag Push Hook' and post_json['event_name'] == 'tag_push':
                     job = Store(repository_name = r.name, repository_url = post_json['project']['ssh_url'], build_tag=post_json['ref'],
                             repository_id = r.id, repository_type = r.type, emails=[post_json['commits'][0]['author']['email'], post_json['user_email']])
                 else:
