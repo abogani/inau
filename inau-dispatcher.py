@@ -92,7 +92,7 @@ class Builder:
         self.process.start()
 
     def update(self, job):
-        logger.info("Checkouting " + job.build_tag + " from " + job.repository_url + "...")
+        logger.info("[" + self.name + "] Checkouting " + job.build_tag + " from " + job.repository_url + "...")
         builddir = self.platdir + "/" + job.repository_name
         if not os.path.isdir(self.platdir):
             os.mkdir(self.platdir)
@@ -104,7 +104,7 @@ class Builder:
         subprocess.run(["git -C " + builddir + " reset --hard " + job.build_tag], shell=True, check=True)
 
     def build(self, job):
-        logging.info("Building " + job.build_tag + " from " + job.repository_url + "...")
+        logging.info("[" + self.name + "] Building " + job.build_tag + " from " + job.repository_url + "...")
         builddir = self.platdir + "/" + job.repository_name
         with paramiko.SSHClient() as sshClient:
             sshClient.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -117,7 +117,7 @@ class Builder:
             job.output = raw.read().decode('latin-1') # utf-8 is rejected by Mysql despite it is properly configured
 
     def store(self, job):
-        logging.info("Storing " + job.build_tag + " from " + job.repository_url + "...")
+        logging.info("[" + self.name + "] Storing " + job.build_tag + " from " + job.repository_url + "...")
             
         build = db.Builds(repository_id=job.repository_id, platform_id=self.platform_id, tag=os.path.basename(job.build_tag), 
                 status=job.status, output=job.output)
@@ -156,7 +156,7 @@ class Builder:
         sendEmail(job.emails, outcome, job.output)
 
     def handler(self):
-        logger.info("Starting process for builder " +  self.name + "...")
+        logger.info("[" + self.name + "] Starting process for builder " +  self.name + "...")
             
         engine.dispose()
         self.session = Session()
@@ -165,7 +165,7 @@ class Builder:
                 job = self.queue.get()
 
                 if isinstance(job, Die):
-                    logger.info("Stopping process for builder " + self.name + "...")
+                    logger.info("[" + self.name + "] Stopping process for builder " + self.name + "...")
                     break
 
                 if isinstance(job, Update):
@@ -322,6 +322,7 @@ class Server(BaseHTTPRequestHandler):
                 # Assign the job to the builder with shortest queue length
                 idx = allbuilders[r.platform_id].index(min(allbuilders[r.platform_id], 
                     key=lambda x:x.queue.qsize()))
+                logger.info("Assign building of " + r.name + " to " + allbuilders[r.platform_id][idx].name)
                 allbuilders[r.platform_id][idx].queue.put(job)
 
             self.send_response(HTTPStatus.OK.value)
