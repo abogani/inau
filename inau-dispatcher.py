@@ -102,7 +102,7 @@ class Builder:
             os.mkdir(self.platdir)
         if os.path.isdir(builddir):
             subprocess.run(["git -C " + builddir + " remote update"], shell=True, check=True)
-            subprocess.run(["git -C " + builddir + " submodule update --remote --force --recursive"], shell=True, check=True)
+            subprocess.run(["git -C " + builddir + " submodule update --init --remote --force --recursive"], shell=True, check=True)
         else:
             subprocess.run(["git clone --recurse-submodule " + job.repository_url + " " + builddir], shell=True, check=True)
         subprocess.run(["git -C " + builddir + " reset --hard " + job.build_tag], shell=True, check=True)
