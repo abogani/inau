@@ -15,6 +15,7 @@ import logging
 import logging.handlers
 import argparse
 import datetime
+#import time
 import subprocess
 import paramiko
 import hashlib
@@ -94,6 +95,9 @@ class Builder:
     def update(self, job):
         logger.info("[" + self.name + "] Checkouting " + job.build_tag + " from " + job.repository_url + "...")
         builddir = self.platdir + "/" + job.repository_name
+        # Wait a second before start to update git repository to avoid:
+        # Command '['git -C /scratch/build/repositories//8/cs/etc/browser/booster reset --hard refs/tags/1.0.34']' returned non-zero exit status 128.
+        # time.sleep(1)
         if not os.path.isdir(self.platdir):
             os.mkdir(self.platdir)
         if os.path.isdir(builddir):
