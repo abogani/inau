@@ -96,6 +96,7 @@ class Builders(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     platform_id = db.Column(db.Integer, db.ForeignKey('platforms.id'), nullable=False)
     name = db.Column(db.String(255), unique=False, nullable=False)
+    environment = db.Column(db.String(255), nullable=True)
     platform = db.relationship('Platforms', lazy=True, backref=db.backref('builders', lazy=True))
 
 class Artifacts(db.Model):
