@@ -1398,6 +1398,6 @@ if __name__ == '__main__':
                 use_reloader=False, use_debugger=False)
     else:
         app.run(host='0.0.0.0', port=args.port, threaded=True,
-                ssl_context=('/etc/ssl/certs/inau_elettra_eu.crt',
+                ssl_context=('/etc/ssl/certs/inau_elettra_eu.pem',
                     '/etc/ssl/private/inau_elettra_eu.key'),
                 use_reloader=False, use_debugger=False)
