@@ -84,14 +84,10 @@ class Store(Build):
         self.emails = emails
 
 class Builder:
-    def __init__(self, name, platform_id, environment):
+    def __init__(self, name, platform_id):
         self.name = name
         self.platform_id = platform_id
         self.platdir = args.repo + '/' + str(platform_id)
-        if environment is None:
-            self.environment = ""
-        else:
-            self.environment = "source " + environment + "; "
         self.queue = Queue()
         self.process = Process(target=self.handler)
         self.process.start()
@@ -118,7 +114,7 @@ class Builder:
             sshClient.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             sshClient.connect(hostname=self.name, port=22, username="inau",
                     key_filename="/home/inau/.ssh/id_rsa.pub")
-            _, raw, _ = sshClient.exec_command("(" + self.environment + "source /etc/profile; cd " + builddir
+            _, raw, _ = sshClient.exec_command("(source /etc/profile; cd " + builddir 
                                 + " && (test -f *.pro && qmake && cuuimake --plain-text-output);"
                                 + " make -j`getconf _NPROCESSORS_ONLN`) 2>&1")
             job.status = raw.channel.recv_exit_status()
@@ -215,10 +211,10 @@ def reconcile():
         newbuilders = {}
         oldbuilders = allbuilders
         for b in session.query(db.Builders).all():
-            if b.platform_id in newbuilders:
-                newbuilders[b.platform_id].append(Builder(b.name, b.platform_id, b.environment))
-            else:
-                newbuilders[b.platform_id] = [Builder(b.name, b.platform_id, b.environment)]
+            try:
+                newbuilders[b.platform_id].append(Builder(b.name, b.platform_id))
+            except KeyError:
+                newbuilders[b.platform_id] = [Builder(b.name, b.platform_id)]
         allbuilders = newbuilders
 
         for oldbuilder in oldbuilders.values():

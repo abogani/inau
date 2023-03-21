@@ -67,7 +67,6 @@ class Builders(Base):
     id = Column(Integer, primary_key=True)
     platform_id = Column(Integer, ForeignKey('platforms.id'), nullable=False)
     name = Column(String(255), unique=False, nullable=False)
-    environment = Column(String(255), unique=False, nullable=True)
 
 class Providers(Base):
     __tablename__ = 'providers'
