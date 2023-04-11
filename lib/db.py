@@ -90,6 +90,7 @@ class Repositories(Base):
     type = Column(Integer, nullable=False)
     name = Column(String(255), nullable=False)
     destination = Column(String(255), nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
 #    builds = relationship('Builds', back_populates='repository')
 #    provider = relationship('Providers', back_populates='repositories')
 

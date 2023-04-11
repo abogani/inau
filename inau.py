@@ -76,6 +76,7 @@ class Repositories(db.Model):
     destination = db.Column(db.String(255), nullable=False)
     provider = db.relationship('Providers', lazy=True, backref=db.backref('repositories', lazy=True))
     platform = db.relationship('Platforms', lazy=True, backref=db.backref('repositories', lazy=True))
+    enabled = db.Column(db.Boolean, default=True, nullable=False)
 
 class Servers(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -732,7 +733,8 @@ repositories_fields = { 'id': fields.Integer(), 'name': fields.String(),
         'distribution': fields.String(attribute='platform.distribution.name'),
         'version': fields.String(attribute='platform.distribution.version'),
         'architecture': fields.String(attribute='platform.architecture.name'),
-        'type': RepositoryTypeItem(), 'destination': fields.String() }
+        'type': RepositoryTypeItem(), 'destination': fields.String(),
+        'enabled': fields.Boolean() }
 class RepositoriesHandler(Resource):
     @marshal_with(repositories_fields)
     def get(self):
@@ -742,7 +744,7 @@ class RepositoriesHandler(Resource):
     def post(self):
         parser = reqparse.RequestParser()
         parser.add_argument('name', required=True, trim=True, nullable=False,
-                type=non_empty_string, help='{error_msg} (e.g. name=fake)')
+                type=non_empty_string, help='{error_msg} (e.g. name=cs/ds/fake)')
         parser.add_argument('provider', required=True, trim=True, nullable=False,
                 type=non_empty_string, help='{error_msg} (e.g. provider=ssh://git@gitlab.elettra.eu:/cs/ds/)')
         parser.add_argument('distribution', required=True, trim=True, nullable=False,
@@ -783,7 +785,7 @@ class RepositoryHandler(Resource):
         repo = Repositories.query.filter(Repositories.id == repositoryid).first_or_404()
         parser = reqparse.RequestParser()
         parser.add_argument('name', default=repo.name, trim=True, nullable=False,
-                type=non_empty_string, help='{error_msg} (e.g. name=fake)')
+                type=non_empty_string, help='{error_msg} (e.g. name=cs/ds/fake)')
         parser.add_argument('provider', default=repo.provider.url, trim=True, nullable=False,
                 type=non_empty_string, help='{error_msg} (e.g. provider=ssh://git@gitlab.elettra.eu:/cs/ds/)')
         parser.add_argument('distribution', default=repo.platform.distribution.name, trim=True,
@@ -791,7 +793,7 @@ class RepositoryHandler(Resource):
         parser.add_argument('version', default=repo.platform.distribution.version, trim=True,
                 nullable=False, type=non_empty_string, help='{error_msg} (e.g. version=18.04)')
         parser.add_argument('architecture', default=repo.platform.architecture.name, trim=True,
-                nullable=False, type=non_empty_string, help='{error_msg} (e.g. architecture=ppc7400)')
+                nullable=False, type=non_empty_string, help='{error_msg} (e.g. architecture=ppc)')
         parser.add_argument('type', default=RepositoryType(repo.type).name, trim=True, nullable=False,
                 choices=['cplusplus', 'python', 'shellscript', 'configuration'], type=non_empty_string,
                 help='{error_msg} (e.g. type=cplusplus)')
