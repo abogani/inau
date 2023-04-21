@@ -100,14 +100,20 @@ class Builder:
         # time.sleep(1)
         if not os.path.isdir(self.platdir):
             os.mkdir(self.platdir)
-        if os.path.isdir(builddir):
+
+        if not os.path.isdir(self.platdir + "/cs/ds/makefiles"):
+            subprocess.run(["git clone --recurse-submodule https://gitlab.elettra.eu/cs/ds/makefiles.git " + self.platdir + "/cs/ds/makefiles"], shell=True, check=True)
+        else:
+            subprocess.run(["git -C " + self.platdir + "/cs/ds/makefiles remote update"], shell=True, check=True)
+            subprocess.run(["git -C " + self.platdir + "/cs/ds/makefiles reset --hard origin/master"], shell=True, check=True)
+
+        if not os.path.isdir(builddir):
+            subprocess.run(["git clone --recurse-submodule " + job.repository_url + " " + builddir], shell=True, check=True)
+        else:
             subprocess.run(["git -C " + builddir + " remote update"], shell=True, check=True)
             subprocess.run(["git -C " + builddir + " submodule update --init --remote --force --recursive"], shell=True, check=True)
-        else:
-            subprocess.run(["git clone --recurse-submodule " + job.repository_url + " " + builddir], shell=True, check=True)
-        subprocess.run(["git -C " + self.platdir + "/cs/ds/makefiles remote update"], shell=True, check=True)
-        subprocess.run(["git -C " + self.platdir + "/cs/ds/makefiles reset --hard origin/master"], shell=True, check=True)
-        subprocess.run(["git -C " + builddir + " reset --hard " + job.build_tag], shell=True, check=True)
+            subprocess.run(["git -C " + builddir + " fetch --tags"], shell=True, check=True)
+        subprocess.run(["git -C " + builddir + " reset --hard " + job.build_tag + " --"], shell=True, check=True)
 
     def build(self, job):
         logging.info("[" + self.name + "] Building " + job.build_tag + " from " + job.repository_url + "...")
