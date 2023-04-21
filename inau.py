@@ -1044,6 +1044,7 @@ class CSInstallationsHandler(Resource):
         destinations = {}
         for repository in Repositories.query.\
                 filter(Repositories.name == args['repository']).\
+                filter(Repositories.enabled == 1).\
                 all():
             for server in repository.platform.servers:
                 for host in server.hosts:
@@ -1122,6 +1123,7 @@ class FacilityInstallationsHandler(Resource):
         destinations = {}
         for repository in Repositories.query.\
                 filter(Repositories.name == args['repository']).\
+                filter(Repositories.enabled == 1).\
                 all():
                     for server in repository.platform.servers:
                         for host in server.hosts:
