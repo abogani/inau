@@ -103,8 +103,9 @@ class Builders(db.Model):
 class Artifacts(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     build_id = db.Column(db.Integer, db.ForeignKey('builds.id'), nullable=False)
-    hash = db.Column(db.String(255), nullable=False)
+    hash = db.Column(db.String(255), nullable=True)
     filename = db.Column(db.String(255), nullable=False)
+    symlink_target = db.Column(db.String(255), nullable=True)
     build = db.relationship('Builds', lazy=True, backref=db.backref('artifacts', lazy=True))
 
 class Builds(db.Model):
@@ -262,7 +263,8 @@ class RepositoryType(IntEnum):
     cplusplus = 0,
     python = 1,
     configuration = 2,
-    shellscript = 3
+    shellscript = 3,
+    library = 4
 
 def install(username, reponame, tag, destinations, itype):
     now = datetime.datetime.now()
@@ -286,32 +288,61 @@ def install(username, reponame, tag, destinations, itype):
                 with sshClient.open_sftp() as sftpClient:
                     for artifact in Artifacts.query.with_parent(build).all():
                         print("Install", artifact.filename, "to", server.name, "...")
-                        with open(app.config['FILES_STORE_DIR'] + artifact.hash, "rb") as binaryFile:
-                                sftpClient.putfo(binaryFile, "/tmp/" + artifact.hash)
-                                filemode = "755"
-                                if repository.type == RepositoryType.configuration:
-                                    filemode = "644"
-                                if itype == InstallationType.GLOBAL or itype == InstallationType.FACILITY:
-                                    cmd = "rm " + server.prefix + "/site/*/" + repository.destination + artifact.filename
-                                    _, _, _ = execSyncedCommand(sshClient, cmd)
-                                    cmd = "install -d " + server.prefix + repository.destination \
-                                            + os.path.dirname(artifact.filename)
-                                    _, _, _ = execSyncedCommand(sshClient, cmd)
-                                    cmd = "install -m" + filemode + " /tmp/" + artifact.hash + " " \
-                                            + server.prefix + repository.destination + artifact.filename
-                                    _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
-                                    if exitStatus != 0:
-                                        raise Exception(stderr)
-                                else: # InstallationType.HOST
-                                    for host in hosts:
-                                        cmd = "install -d " + server.prefix + "/site/" + host.name + "/" \
-                                                + repository.destination + os.path.dirname(artifact.filename)
-                                        _, _, _ = execSyncedCommand(sshClient, cmd)
-                                        cmd =  "install -m" + filemode + " /tmp/" + artifact.hash + " " + server.prefix \
-                                            + "/site/" + host.name  + "/" + repository.destination + artifact.filename
-                                        _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
+                        if artifact.hash is not None:
+                            with open(app.config['FILES_STORE_DIR'] + artifact.hash, "rb") as binaryFile:
+                                    sftpClient.putfo(binaryFile, "/tmp/" + artifact.hash)
+                                    filemode = "755"
+                                    if repository.type == RepositoryType.configuration or repository.type == RepositoryType.library:
+                                        filemode = "644"
+                                    if itype == InstallationType.GLOBAL or itype == InstallationType.FACILITY:
+                                        if not repository.type == RepositoryType.library:
+                                            cmd = "rm " + server.prefix + "/site/*/" + repository.destination + artifact.filename
+                                            _, _, _ = execSyncedCommand(sshClient, cmd)
+                                            cmd = "install -d " + server.prefix + repository.destination \
+                                                    + os.path.dirname(artifact.filename)
+                                            _, _, _ = execSyncedCommand(sshClient, cmd)
+                                            cmd = "install -m" + filemode + " /tmp/" + artifact.hash + " " \
+                                                    + server.prefix + repository.destination + artifact.filename
+                                            _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
+                                        else:
+                                            cmd = "rm " + server.prefix + "/site/*/" + artifact.filename
+                                            _, _, _ = execSyncedCommand(sshClient, cmd)
+                                            cmd = "install -d " + server.prefix + os.path.dirname(artifact.filename)
+                                            _, _, _ = execSyncedCommand(sshClient, cmd)
+                                            cmd = "install -m" + filemode + " /tmp/" + artifact.hash + " " \
+                                                    + server.prefix + artifact.filename
+                                            _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
                                         if exitStatus != 0:
                                             raise Exception(stderr)
+                                    else: # InstallationType.HOST
+                                        for host in hosts:
+                                            if not repository.type == RepositoryType.library:
+                                                cmd = "install -d " + server.prefix + "/site/" + host.name + "/" \
+                                                        + repository.destination + os.path.dirname(artifact.filename)
+                                                _, _, _ = execSyncedCommand(sshClient, cmd)
+                                                cmd =  "install -m" + filemode + " /tmp/" + artifact.hash + " " + server.prefix \
+                                                    + "/site/" + host.name  + "/" + repository.destination + artifact.filename
+                                                _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
+                                            else:
+                                                cmd = "install -d " + server.prefix + "/site/" + host.name + "/" \
+                                                        + os.path.dirname(artifact.filename)
+                                                _, _, _ = execSyncedCommand(sshClient, cmd)
+                                                cmd =  "install -m" + filemode + " /tmp/" + artifact.hash + " " + server.prefix \
+                                                    + "/site/" + host.name  + "/" + artifact.filename
+                                                _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
+                                            if exitStatus != 0:
+                                                raise Exception(stderr)
+                        else:
+                            if itype == InstallationType.GLOBAL or itype == InstallationType.FACILITY:
+                                cmd = "rm " + server.prefix + "/site/*/" + artifact.filename
+                                _, _, _ = execSyncedCommand(sshClient, cmd)
+                                cmd = "ln -sfrn " + server.prefix + artifact.symlink_target  + " " + server.prefix + artifact.filename
+                            else:
+                                cmd = "ln -sfrn " + server.prefix + "/site/" + host.name + "/" + artifact.symlink_target \
+                                        + " " + server.prefix + "/site/" + host.name + "/" + artifact.filename
+                            _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
+                            if exitStatus != 0:
+                                raise Exception(stderr)
         except Exception as e:
             raise InternalServerError(description=str(e))
 
@@ -726,6 +757,8 @@ class RepositoryTypeItem(fields.Raw):
             return 'python'
         elif value == RepositoryType.shellscript:
             return 'shellscript'
+        elif value == RepositoryType.library:
+            return 'library'
         else: # value == RepositoryType.configuration
             return 'configuration'
 
@@ -755,7 +788,7 @@ class RepositoriesHandler(Resource):
         parser.add_argument('architecture', required=True, trim=True, nullable=False,
                 type=non_empty_string, help='{error_msg} (e.g. architecture=ppc7400)')
         parser.add_argument('type', required=True, trim=True, nullable=False,
-                choices=['cplusplus', 'python', 'shellscript', 'configuration'], type=non_empty_string,
+                choices=['cplusplus', 'python', 'shellscript', 'configuration', 'library'], type=non_empty_string,
                 help='{error_msg} (e.g. type=cplusplus)')
         parser.add_argument('destination', required=True, trim=True, nullable=False,
                 type=non_empty_string, help='{error_msg} (e.g. destination=/bin/)')
@@ -796,7 +829,7 @@ class RepositoryHandler(Resource):
         parser.add_argument('architecture', default=repo.platform.architecture.name, trim=True,
                 nullable=False, type=non_empty_string, help='{error_msg} (e.g. architecture=ppc)')
         parser.add_argument('type', default=RepositoryType(repo.type).name, trim=True, nullable=False,
-                choices=['cplusplus', 'python', 'shellscript', 'configuration'], type=non_empty_string,
+                choices=['cplusplus', 'python', 'shellscript', 'configuration', 'library'], type=non_empty_string,
                 help='{error_msg} (e.g. type=cplusplus)')
         parser.add_argument('destination', default=repo.destination, trim=True, nullable=False,
                 type=non_empty_string, help='{error_msg} (e.g. destination=/bin/)')
@@ -1276,6 +1309,8 @@ def build():
                                         if repo.type == RepositoryType.cplusplus or repo.type == RepositoryType.python \
                                                 or repo.type == RepositoryType.shellscript:
                                             dir = "/bin/"
+                                        elif repo.type == RepositoryType.library:
+                                            dir = "/lib/"
                                         else: # repo.type == RepositoryType.configuration
                                             dir = "/etc/"
 

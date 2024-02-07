@@ -115,7 +115,7 @@ class Builder:
             subprocess.run(["git clone --recurse-submodule " + job.repository_url + " " + builddir], shell=True, check=True)
         else:
             subprocess.run(["git -C " + builddir + " remote update"], shell=True, check=True)
-            subprocess.run(["git -C " + builddir + " submodule update --init --remote --force --recursive"], shell=True, check=True)
+            subprocess.run(["git -C " + builddir + " submodule update --init --force --recursive"], shell=True, check=True)
             subprocess.run(["git -C " + builddir + " fetch --tags"], shell=True, check=True)
         subprocess.run(["git -C " + builddir + " reset --hard " + job.build_tag + " --"], shell=True, check=True)
 
@@ -126,9 +126,14 @@ class Builder:
             sshClient.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             sshClient.connect(hostname=self.name, port=22, username="inau",
                     key_filename="/home/inau/.ssh/id_rsa.pub")
-            _, raw, _ = sshClient.exec_command("(" + self.environment + "source /etc/profile; cd " + builddir
-                                + " && (test -f *.pro && qmake && cuuimake --plain-text-output);"
-                                + " make -j`getconf _NPROCESSORS_ONLN`) 2>&1")
+            if job.repository_type != db.RepositoryType.library:
+                _, raw, _ = sshClient.exec_command("(" + self.environment + "source /etc/profile; cd " + builddir
+                        + " && (test -f *.pro && qmake && cuuimake --plain-text-output);"
+                        + " make -j`getconf _NPROCESSORS_ONLN`) 2>&1")
+            else:
+                _, raw, _ = sshClient.exec_command("(" + self.environment + "source /etc/profile; cd " + builddir
+                        + " && (test -f *.pro && qmake && cuuimake --plain-text-output);"
+                        + " make -j`getconf _NPROCESSORS_ONLN` && rm -fr .install && PREFIX=.install make install)  2>&1")
             job.status = raw.channel.recv_exit_status()
             job.output = raw.read().decode('latin-1') # utf-8 is rejected by Mysql despite it is properly configured
 
@@ -151,6 +156,8 @@ class Builder:
                 basedir = builddir + "/bin/"
             elif job.repository_type == db.RepositoryType.configuration:
                 basedir = builddir + "/etc/"
+            elif job.repository_type == db.RepositoryType.library:
+                basedir = builddir + "/.install/"
             else:
                 raiseException('Invalid type')
 
@@ -161,12 +168,18 @@ class Builder:
                     dir = os.path.basename(r) + "/"
                 for file in f:
                     hashFile = ""
-                    with open(basedir + dir + file,"rb") as fd:
-                        bytes = fd.read()
-                        hashFile = hashlib.sha256(bytes).hexdigest();
-                        if not os.path.isfile(args.store + hashFile):
-                            shutil.copyfile(basedir + dir + file, args.store + hashFile, follow_symlinks=False)
-                        artifacts.append(db.Artifacts(build_id=build.id, hash=hashFile, filename=dir+file))
+                    if not os.path.islink(basedir + dir + file):
+                        try:
+                            with open(basedir + dir + file,"rb") as fd:
+                                bytes = fd.read()
+                                hashFile = hashlib.sha256(bytes).hexdigest();
+                                if not os.path.isfile(args.store + hashFile):
+                                    shutil.copyfile(basedir + dir + file, args.store + hashFile, follow_symlinks=False)
+                                artifacts.append(db.Artifacts(build_id=build.id, hash=hashFile, filename=dir+file))
+                        except Exception as err:
+                            job.output += str(err) + "\n"
+                    else:
+                        artifacts.append(db.Artifacts(build_id=build.id, symlink_target=dir+os.readlink(basedir + dir + file), filename=dir+file))
             self.session.add_all(artifacts)
             self.session.commit()
         sendEmail(job.emails, outcome, job.output)
@@ -179,7 +192,6 @@ class Builder:
         while True:
             try:
                 job = self.queue.get()
-
                 if isinstance(job, Die):
                     logger.info("[" + self.name + "] Stopping process for builder " + self.name + "...")
                     break

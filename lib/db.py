@@ -80,7 +80,8 @@ class RepositoryType(IntEnum):
     cplusplus = 0,
     python = 1,
     configuration = 2,
-    shellscript = 3
+    shellscript = 3,
+    library = 4
 
 class Repositories(Base):
     __tablename__ = 'repositories'
@@ -113,8 +114,9 @@ class Artifacts(Base):
 
     id = Column(Integer, primary_key=True)
     build_id = Column(Integer, ForeignKey('builds.id'), nullable=False)
-    hash = Column(String(255), nullable=False)
+    hash = Column(String(255), nullable=True)
     filename = Column(String(255), nullable=False)
+    symlink_target = Column(String(255), nullable=True)
 #    build = db.relationship('Builds', lazy=True, backref=db.backref('artifacts', lazy=True))
 
 ##class Installations(db.Model):
