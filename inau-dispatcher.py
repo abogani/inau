@@ -162,24 +162,24 @@ class Builder:
                 raiseException('Invalid type')
 
             artifacts = []
-            for r, d, f in os.walk(basedir):
-                dir = ""
-                if r != basedir:
-                    dir = os.path.basename(r) + "/"
-                for file in f:
-                    hashFile = ""
-                    if not os.path.islink(basedir + dir + file):
-                        try:
-                            with open(basedir + dir + file,"rb") as fd:
+            for rdir_abs, _, fnames in os.walk(basedir):
+                for fname in fnames:
+                    fname_abs = os.path.join(rdir_abs, fname)
+                    rdir_rel = os.path.relpath(rdir_abs, basedir)
+                    fname_rel = os.path.join(rdir_rel, fname)
+#                    print("rdir_abs ", rdir_abs, "fname", fname, "fname_abs", fname_abs,
+#                            "rdir_rel", rdir_rel, "fname_rel", fname_rel)
+                    if not os.path.islink(fname_abs):
+                        with open(fname_abs,"rb") as fd:
                                 bytes = fd.read()
                                 hashFile = hashlib.sha256(bytes).hexdigest();
                                 if not os.path.isfile(args.store + hashFile):
-                                    shutil.copyfile(basedir + dir + file, args.store + hashFile, follow_symlinks=False)
-                                artifacts.append(db.Artifacts(build_id=build.id, hash=hashFile, filename=dir+file))
-                        except Exception as err:
-                            job.output += str(err) + "\n"
+                                    shutil.copyfile(fname_abs, args.store + hashFile, follow_symlinks=False)
+                                artifacts.append(db.Artifacts(build_id=build.id, hash=hashFile, filename=fname_rel))
                     else:
-                        artifacts.append(db.Artifacts(build_id=build.id, symlink_target=dir+os.readlink(basedir + dir + file), filename=dir+file))
+                        artifacts.append(db.Artifacts(build_id=build.id,
+                            symlink_target=os.path.relpath(rdir_rel, os.readlink(fname_abs)),
+                            filename=fname_rel))
             self.session.add_all(artifacts)
             self.session.commit()
         sendEmail(job.emails, outcome, job.output)
