@@ -10,6 +10,7 @@ import shutil
 import hashlib
 import os
 import git
+import re
 from enum import Enum, IntEnum
 from werkzeug.exceptions import HTTPException, Unauthorized, Forbidden, InternalServerError, MethodNotAllowed, BadRequest, UnprocessableEntity, NotFound
 from smtplib import SMTP
@@ -286,7 +287,16 @@ def install(username, reponame, tag, destinations, itype):
                 sshClient.connect(hostname=server.name, port=22, username="root",
                         key_filename="/home/inau/.ssh/id_rsa.pub")
                 with sshClient.open_sftp() as sftpClient:
+                    artifacts = []
+                    for host in hosts:
+                        facility = host.facility.name
                     for artifact in Artifacts.query.with_parent(build).all():
+                        if repository.type == RepositoryType.library and facility != "development":
+                            if re.search("^lib/(lib|qumbia)", artifact.filename):
+                                artifacts.append(artifact)
+                        else :
+                            artifacts.append(artifact)
+                    for artifact in artifacts:
                         print("Install", artifact.filename, "to", server.name, "...")
                         if artifact.hash is not None:
                             with open(app.config['FILES_STORE_DIR'] + artifact.hash, "rb") as binaryFile:

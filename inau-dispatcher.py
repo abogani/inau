@@ -177,9 +177,8 @@ class Builder:
                                     shutil.copyfile(fname_abs, args.store + hashFile, follow_symlinks=False)
                                 artifacts.append(db.Artifacts(build_id=build.id, hash=hashFile, filename=fname_rel))
                     else:
-                        artifacts.append(db.Artifacts(build_id=build.id,
-                            symlink_target=os.path.relpath(rdir_rel, os.readlink(fname_abs)),
-                            filename=fname_rel))
+                        artifacts.append(db.Artifacts(build_id=build.id, filename=fname_rel,
+                            symlink_target=os.path.join(rdir_rel, os.readlink(fname_abs))))
             self.session.add_all(artifacts)
             self.session.commit()
         sendEmail(job.emails, outcome, job.output)
