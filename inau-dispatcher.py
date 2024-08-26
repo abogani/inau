@@ -43,7 +43,8 @@ def __sendEmail(to_addrs, subject, body):
             msg['Subject'] = "INAU. " + subject
             msg['From'] = sender
             msg['To'] = ', '.join(to_addrs)
-            smtpClient.sendmail(from_addr=sender, to_addrs=list(to_addrs), msg=msg.as_string())
+            d = smtpClient.sendmail(from_addr=sender, to_addrs=list(to_addrs), msg=msg.as_string())
+            print("Email sent to ", list(to_addrs), d)
 
 def sendEmail(recipients, subject, body):
     notifiable = set()
@@ -113,10 +114,11 @@ class Builder:
 
         if not os.path.isdir(builddir):
             subprocess.run(["git clone --recurse-submodule " + job.repository_url + " " + builddir], shell=True, check=True)
-        else:
-            subprocess.run(["git -C " + builddir + " remote update"], shell=True, check=True)
-            subprocess.run(["git -C " + builddir + " submodule update --init --force --recursive"], shell=True, check=True)
-            subprocess.run(["git -C " + builddir + " fetch --tags"], shell=True, check=True)
+        subprocess.run(["git -C " + builddir + " remote update"], shell=True, check=True)
+        subprocess.run(["git -C " + builddir + " submodule update --init --force --recursive"], shell=True, check=True)
+        subprocess.run(["git -C " + builddir + " fetch --tags"], shell=True, check=True)
+#       subprocess.run(["git -C " + builddir + " pull"], shell=True, check=True)
+#       subprocess.run(['git branch --no-color --contains ' + job.build_tag + ' master | grep \<master\>', 
         subprocess.run(["git -C " + builddir + " reset --hard " + job.build_tag + " --"], shell=True, check=True)
 
     def build(self, job):
@@ -342,7 +344,8 @@ class Server(BaseHTTPRequestHandler):
             for r in session.query(db.Repositories).filter(db.Repositories.name==post_json['project']['path_with_namespace']).all():
                 if self.headers['X-Gitlab-Event'] == 'Tag Push Hook' and post_json['event_name'] == 'tag_push' and r.enabled:
                     job = Store(repository_name = r.name, repository_url = post_json['project']['ssh_url'], build_tag=post_json['ref'],
-                            repository_id = r.id, repository_type = r.type, emails=[post_json['commits'][0]['author']['email'], post_json['user_email']])
+                            repository_id = r.id, repository_type = r.type, emails=[post_json['commits'][0]['author']['email'], 
+                                post_json['user_username'] + '@elettra.eu', post_json['user_email']])
                 else:
                     continue
 

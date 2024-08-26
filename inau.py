@@ -279,6 +279,7 @@ def install(username, reponame, tag, destinations, itype):
                 .filter(Repositories.name == reponame) \
                 .first_or_404(description='Repository not found. Check syntax.')
         build = Builds.query.with_parent(repository).filter(Builds.tag == tag, Builds.status == 0) \
+                .order_by(Builds.id.desc()) \
                 .first_or_404("Requested build not available. Check annotated tag.")
         try:
             with paramiko.SSHClient() as sshClient:
@@ -302,8 +303,9 @@ def install(username, reponame, tag, destinations, itype):
                             with open(app.config['FILES_STORE_DIR'] + artifact.hash, "rb") as binaryFile:
                                     sftpClient.putfo(binaryFile, "/tmp/" + artifact.hash)
                                     filemode = "755"
-                                    if repository.type == RepositoryType.configuration or repository.type == RepositoryType.library:
+                                    if repository.type == RepositoryType.configuration:
                                         filemode = "644"
+                                    # repository.type == RepositoryType.library have to provide files with the right permissions
                                     if itype == InstallationType.GLOBAL or itype == InstallationType.FACILITY:
                                         if not repository.type == RepositoryType.library:
                                             cmd = "rm " + server.prefix + "/site/*/" + repository.destination + artifact.filename
@@ -319,7 +321,7 @@ def install(username, reponame, tag, destinations, itype):
                                             _, _, _ = execSyncedCommand(sshClient, cmd)
                                             cmd = "install -d " + server.prefix + os.path.dirname(artifact.filename)
                                             _, _, _ = execSyncedCommand(sshClient, cmd)
-                                            cmd = "install -m" + filemode + " /tmp/" + artifact.hash + " " \
+                                            cmd = "install " + "/tmp/" + artifact.hash + " " \
                                                     + server.prefix + artifact.filename
                                             _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
                                         if exitStatus != 0:
@@ -337,7 +339,7 @@ def install(username, reponame, tag, destinations, itype):
                                                 cmd = "install -d " + server.prefix + "/site/" + host.name + "/" \
                                                         + os.path.dirname(artifact.filename)
                                                 _, _, _ = execSyncedCommand(sshClient, cmd)
-                                                cmd =  "install -m" + filemode + " /tmp/" + artifact.hash + " " + server.prefix \
+                                                cmd =  "install " + "/tmp/" + artifact.hash + " " + server.prefix \
                                                     + "/site/" + host.name  + "/" + artifact.filename
                                                 _, stderr, exitStatus = execSyncedCommand(sshClient, cmd)
                                             if exitStatus != 0:
