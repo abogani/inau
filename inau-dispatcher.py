@@ -100,6 +100,7 @@ class Builder:
     def update(self, job):
         logger.info("[" + self.name + "] Checkouting " + job.build_tag + " from " + job.repository_url + "...")
         builddir = self.platdir + "/" + job.repository_name
+        buildcmd = ""
         # Wait a second before start to update git repository to avoid:
         # Command '['git -C /scratch/build/repositories//8/cs/etc/browser/booster reset --hard refs/tags/1.0.34']' returned non-zero exit status 128.
         # time.sleep(1)
@@ -107,19 +108,20 @@ class Builder:
             os.mkdir(self.platdir)
 
         if not os.path.isdir(self.platdir + "/cs/ds/makefiles"):
-            subprocess.run(["git clone --recurse-submodule https://gitlab.elettra.eu/cs/ds/makefiles.git " + self.platdir + "/cs/ds/makefiles"], shell=True, check=True)
+            buildcmd += "git clone --recurse-submodule https://gitlab.elettra.eu/cs/ds/makefiles.git " + self.platdir + "/cs/ds/makefiles"
         else:
-            subprocess.run(["git -C " + self.platdir + "/cs/ds/makefiles remote update"], shell=True, check=True)
-            subprocess.run(["git -C " + self.platdir + "/cs/ds/makefiles reset --hard origin/master"], shell=True, check=True)
+            buildcmd += "git -C " + self.platdir + "/cs/ds/makefiles remote update"
+            buildcmd += " && git -C " + self.platdir + "/cs/ds/makefiles reset --hard origin/master"
 
         if not os.path.isdir(builddir):
-            subprocess.run(["git clone --recurse-submodule " + job.repository_url + " " + builddir], shell=True, check=True)
-        subprocess.run(["git -C " + builddir + " remote update"], shell=True, check=True)
-        subprocess.run(["git -C " + builddir + " submodule update --init --force --recursive"], shell=True, check=True)
-        subprocess.run(["git -C " + builddir + " fetch --tags"], shell=True, check=True)
+            buildcmd += " && git clone --recurse-submodule " + job.repository_url + " " + builddir
+        buildcmd += " && git -C " + builddir + " remote update"
+        buildcmd += " && git -C " + builddir + " fetch --tags"
 #       subprocess.run(["git -C " + builddir + " pull"], shell=True, check=True)
 #       subprocess.run(['git branch --no-color --contains ' + job.build_tag + ' master | grep \<master\>', 
-        subprocess.run(["git -C " + builddir + " reset --hard " + job.build_tag + " --"], shell=True, check=True)
+        buildcmd += " && git -C " + builddir + " reset --hard " + job.build_tag + " --"
+        buildcmd += " && git -C " + builddir + " submodule update --init --force --recursive"
+        subprocess.run(buildcmd, shell=True, check=True)
 
     def build(self, job):
         logging.info("[" + self.name + "] Building " + job.build_tag + " from " + job.repository_url + "...")
