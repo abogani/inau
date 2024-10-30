@@ -293,9 +293,14 @@ def install(username, reponame, tag, destinations, itype):
                         facility = host.facility.name
                     for artifact in Artifacts.query.with_parent(build).all():
                         if repository.type == RepositoryType.library and facility != "development":
-                            if re.search("^lib/(lib|qumbia)", artifact.filename):
-                                artifacts.append(artifact)
-                        else :
+                            if re.search("^(lib/|bin/)", artifact.filename):
+                                if re.search("^(lib/cmake|lib/pkgconfig)", artifact.filename):
+                                    pass
+                                else:
+                                   artifacts.append(artifact)
+                            else:
+                                pass
+                        else:
                             artifacts.append(artifact)
                     for artifact in artifacts:
                         print("Install", artifact.filename, "to", server.name, "...")
