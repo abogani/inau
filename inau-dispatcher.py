@@ -132,12 +132,10 @@ class Builder:
                     key_filename="/home/inau/.ssh/id_rsa.pub")
             if job.repository_type != db.RepositoryType.library:
                 _, raw, _ = sshClient.exec_command("(" + self.environment + "source /etc/profile; cd " + builddir
-                        + " && (test -f *.pro && qmake && cuuimake --plain-text-output);"
-                        + " make -j`getconf _NPROCESSORS_ONLN`) 2>&1")
+                        + "; make -j`getconf _NPROCESSORS_ONLN`) 2>&1")
             else:
                 _, raw, _ = sshClient.exec_command("(" + self.environment + "source /etc/profile; cd " + builddir
-                        + " && (test -f *.pro && qmake && cuuimake --plain-text-output);"
-                        + " make -j`getconf _NPROCESSORS_ONLN` && rm -fr .install && PREFIX=.install make install)  2>&1")
+                        + "; make -j`getconf _NPROCESSORS_ONLN` && rm -fr .install && PREFIX=.install make install)  2>&1")
             job.status = raw.channel.recv_exit_status()
             job.output = raw.read().decode('latin-1') # utf-8 is rejected by Mysql despite it is properly configured
 
