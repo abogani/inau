@@ -1282,90 +1282,6 @@ def updateRepo(repo):
     atagsAfter = retrieveAnnotatedTags(gitrepo)
     return gitrepo, atagsAfter - atagsBefore
 
-def build():
-    try:
-        with db.app.app_context():
-            print("Checking makefiles repository for updates...") 
-            updateRepo(Repositories.query.filter(Repositories.name == "makefiles").first())
-            for distinctRepo in Repositories.query.with_entities(Repositories.name) \
-                    .filter(Repositories.name != "makefiles").filter(Repositories.provider_id != 11).distinct().all():
-                try:
-                    print("Checking " + distinctRepo.name  + " repository for updates... ") 
-                    gitrepo, newAtags = updateRepo(Repositories.query \
-                            .filter(Repositories.name == distinctRepo.name).first())
-                    time.sleep(1)
-                    for atag in newAtags:
-                        for repo in Repositories.query \
-                                .filter(Repositories.name == distinctRepo.name).all():
-                            builder = Builders.query \
-                                    .filter(Builders.platform_id == repo.platform.id).first()
-                            if builder is None:
-                                raise Exception("Missing builder")
-                            print("Checkout " + str(atag) + " of the reporitory " + repo.name + "...") 
-                            gitrepo.git.checkout(str(atag))
-                            print("SSH-ing to builder " + builder.name + "...")
-                            try:
-                                with paramiko.SSHClient() as sshClient:
-                                    sshClient.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-                                    sshClient.connect(hostname=builder.name, port=22, username="inau",
-                                            key_filename="/home/inau/.ssh/id_rsa.pub")
-                                    print("Start building " + str(atag) + " from " + repo.name 
-                                            + " git repo on " + builder.name + "...")
-                                    stdout, _, exitStatus = execSyncedCommand(sshClient,
-                                            "source /etc/profile; cd " + app.config['GIT_TREES_DIR'] + repo.name + 
-                                            "&& make clean; (test -f *.pro && qmake && cuuimake --plain-text-output); make 2>&1")
-                                    print("Building " + str(atag) + " from " + repo.name 
-                                            + " git repo on " + builder.name + " finished with code: " + str(exitStatus))
-                                    build = Builds(repository_id=repo.id, platform_id=repo.platform_id, tag=str(atag), status=exitStatus, output=stdout) 
-                                    db.session.add(build)
-                                    db.session.commit()
-                                    if exitStatus == 0:
-                                        outcome = repo.name + " " + str(atag) + ": built successfully on " + builder.name
-
-                                        dir = "/not-existing-directory-which-should-produce-an-error/"
-                                        if repo.type == RepositoryType.cplusplus or repo.type == RepositoryType.python \
-                                                or repo.type == RepositoryType.shellscript:
-                                            dir = "/bin/"
-                                        elif repo.type == RepositoryType.library:
-                                            dir = "/lib/"
-                                        else: # repo.type == RepositoryType.configuration
-                                            dir = "/etc/"
-
-                                        print("Looking for file(s) in " + dir + "...")
-
-                                        basedir = app.config['GIT_TREES_DIR'] + repo.name + dir
-                                        for r, d, f in os.walk(basedir):
-                                            dir = ""
-                                            if r != basedir:
-                                                dir = os.path.basename(r) + "/"
-                                            for file in f:
-                                                hashFile = ""
-                                                with open(basedir + dir + file,"rb") as fd:
-                                                    bytes = fd.read()
-                                                    hashFile = hashlib.sha256(bytes).hexdigest();
-                                                    if not os.path.isfile(app.config['FILES_STORE_DIR'] + hashFile):
-                                                        print("Install " + basedir + dir + file + " in the file-store as " + hashFile + "...")
-                                                        shutil.copyfile(basedir + dir + file, app.config['FILES_STORE_DIR'] + hashFile, follow_symlinks=False)
-                                                artifact = Artifacts(build_id=build.id, hash=hashFile, filename=dir+file)
-                                                db.session.add(artifact)
-                                                db.session.commit()
-                                    else:
-                                        outcome = repo.name + " " + str(atag) + ": built failed on " + builder.name
-                                    print("Send email to", atag.tag.tagger.email)
-                                    sendEmail([atag.tag.tagger.email], outcome, stdout)
-                                    if str([atag.tag.tagger.email]) != str([atag.tag.object.author.email]):
-                                        print("Send email to", atag.tag.object.author.email)
-                                        sendEmail([atag.tag.object.author.email], outcome, stdout)
-                            except Exception as e:
-                                print("Error on " + distinctRepo.name + " repository: ", e)
-                                sendEmailAdmins("Error on " + distinctRepo.name + " repository", e)
-                except Exception as e:
-                    print("Error on " + distinctRepo.name + " repository: ", e)
-                    sendEmailAdmins("Error on " + distinctRepo.name + " repository", e)
-    except Exception as e:
-        printf("Error on makefiles repository: ", e)
-        sendEmailAdmins("Error on makefiles repository", e)
-
 
 if __name__ == '__main__':
     # Configure Flask
@@ -1377,8 +1293,6 @@ if __name__ == '__main__':
     app.config['GIT_TREES_DIR'] = args.repo
     app.config['LDAP_URL'] = args.ldap
     app.config['BUNDLE_ERRORS'] = True
-    app.config['JOBS'] = [{'id': 'builder', 'func': build,
-        'trigger': 'interval', 'seconds': 60}]
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     if args.port != "443":
         app.debug = True
