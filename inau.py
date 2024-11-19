@@ -305,7 +305,7 @@ def install(username, reponame, tag, destinations, itype):
                     for artifact in artifacts:
                         print("Install", artifact.filename, "to", server.name, "...")
                         if artifact.hash is not None:
-                            with open(app.config['FILES_STORE_DIR'] + artifact.hash, "rb") as binaryFile:
+                            with open(app.config['FILES_STORE_DIR'] + artifact.hash[0:2] + "/" + artifact.hash[2:4] + "/" + artifact.hash, "rb") as binaryFile:
                                     sftpClient.putfo(binaryFile, "/tmp/" + artifact.hash)
                                     filemode = "755"
                                     if repository.type == RepositoryType.configuration:

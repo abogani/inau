@@ -162,9 +162,12 @@ class Builder:
                     if not os.path.islink(fname_abs):
                         with open(fname_abs,"rb") as fd:
                                 bytes = fd.read()
-                                hashFile = hashlib.sha256(bytes).hexdigest();
+                                hashFile = hashlib.sha256(bytes).hexdigest()
+                                hashDir = hashFile[0:2] + "/" + hashFile[2:4]
+                                if not os.path.isdir(args.store + hashDir):
+                                    os.makedirs(args.store + hashDir, exist_ok=True)
                                 if not os.path.isfile(args.store + hashFile):
-                                    shutil.copyfile(fname_abs, args.store + hashFile, follow_symlinks=False)
+                                    shutil.copyfile(fname_abs, args.store + hashDir + "/" + hashFile, follow_symlinks=False)
                                 artifacts.append(db.Artifacts(build_id=build.id, hash=hashFile, filename=fname_rel))
                     else:
                         artifacts.append(db.Artifacts(build_id=build.id, filename=fname_rel,
