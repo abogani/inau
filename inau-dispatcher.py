@@ -21,13 +21,98 @@ import hashlib
 import shutil
 from smtplib import SMTP
 from email.mime.text import MIMEText
-
-from lib import db
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, func
+from sqlalchemy.orm import relationship
+from enum import Enum, IntEnum
+import datetime
 
 Session = sessionmaker()
 
 allbuilders = {}
 users = {}
+
+Base = declarative_base()
+
+class Users(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, nullable=False)
+    admin = Column(Boolean, default=False, nullable=False)
+    notify = Column(Boolean, default=False, nullable=False)
+
+class Architectures(Base):
+    __tablename__ = 'architectures'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, nullable=False)
+    platforms = relationship('Platforms', back_populates='architecture')
+
+class Distributions(Base):
+    __tablename__ = 'distributions'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False)
+    version = Column(String(255), nullable=False)
+    platforms = relationship('Platforms', back_populates='distribution')
+
+class Platforms(Base):
+    __tablename__ = 'platforms'
+    id = Column(Integer, primary_key=True)
+    distribution_id = Column(Integer, ForeignKey('distributions.id'), nullable=False)
+    architecture_id = Column(Integer, ForeignKey('architectures.id'), nullable=False)
+    architecture = relationship('Architectures', back_populates='platforms')
+    distribution = relationship('Distributions', back_populates='platforms')
+
+class Builders(Base):
+    __tablename__ = 'builders'
+
+    id = Column(Integer, primary_key=True)
+    platform_id = Column(Integer, ForeignKey('platforms.id'), nullable=False)
+    name = Column(String(255), unique=False, nullable=False)
+    environment = Column(String(255), unique=False, nullable=True)
+
+class Providers(Base):
+    __tablename__ = 'providers'
+
+    id = Column(Integer, primary_key=True)
+    url = Column(String(255), unique=True, nullable=False)
+
+class RepositoryType(IntEnum):
+    cplusplus = 0,
+    python = 1,
+    configuration = 2,
+    shellscript = 3,
+    library = 4
+
+class Repositories(Base):
+    __tablename__ = 'repositories'
+
+    id = Column(Integer, primary_key=True)
+    provider_id = Column(Integer, ForeignKey('providers.id'), nullable=False)
+    platform_id = Column(Integer, ForeignKey('platforms.id'), nullable=False)
+    type = Column(Integer, nullable=False)
+    name = Column(String(255), nullable=False)
+    destination = Column(String(255), nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+
+class Builds(Base):
+    __tablename__ = 'builds'
+
+    id = Column(Integer, primary_key=True)
+    repository_id = Column(Integer, ForeignKey('repositories.id'), nullable=False)
+    platform_id = Column(Integer, ForeignKey('platforms.id'), nullable=False)
+    tag = Column(String(255), nullable=False)
+    date = Column(DateTime, default=datetime.datetime.now, nullable=False)
+    status = Column(Integer, nullable=True)
+    output = Column(Text, nullable=True)
+
+class Artifacts(Base):
+    __tablename__ = 'artifacts'
+
+    id = Column(Integer, primary_key=True)
+    build_id = Column(Integer, ForeignKey('builds.id'), nullable=False)
+    hash = Column(String(255), nullable=True)
+    filename = Column(String(255), nullable=False)
+    symlink_target = Column(String(255), nullable=True)
 
 def __sendEmail(to_addrs, subject, body):
     if to_addrs:
@@ -120,7 +205,7 @@ class Builder:
             sshClient.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             sshClient.connect(hostname=self.name, port=22, username="inau",
                     key_filename="/home/inau/.ssh/id_rsa.pub")
-            if job.repository_type != db.RepositoryType.library:
+            if job.repository_type != RepositoryType.library:
                 _, raw, _ = sshClient.exec_command("(" + self.environment + "source /etc/profile; cd " + builddir
                         + "; make -j`getconf _NPROCESSORS_ONLN`) 2>&1")
             else:
@@ -132,7 +217,7 @@ class Builder:
     def store(self, job):
         logging.info("[" + self.name + "] Storing " + job.build_tag + " from " + job.repository_url + "...")
             
-        build = db.Builds(repository_id=job.repository_id, platform_id=self.platform_id, tag=os.path.basename(job.build_tag), 
+        build = Builds(repository_id=job.repository_id, platform_id=self.platform_id, tag=os.path.basename(job.build_tag), 
                 status=job.status, output=job.output)
         self.session.add(build)
         self.session.commit()
@@ -143,12 +228,12 @@ class Builder:
             outcome += ": built failed on " + self.name
         else:
             outcome += ": built successfully on " + self.name
-            if job.repository_type == db.RepositoryType.cplusplus or job.repository_type == db.RepositoryType.python \
-                    or job.repository_type == db.RepositoryType.shellscript:
+            if job.repository_type == RepositoryType.cplusplus or job.repository_type == RepositoryType.python \
+                    or job.repository_type == RepositoryType.shellscript:
                 basedir = builddir + "/bin/"
-            elif job.repository_type == db.RepositoryType.configuration:
+            elif job.repository_type == RepositoryType.configuration:
                 basedir = builddir + "/etc/"
-            elif job.repository_type == db.RepositoryType.library:
+            elif job.repository_type == RepositoryType.library:
                 basedir = builddir + "/.install/"
             else:
                 raiseException('Invalid type')
@@ -168,9 +253,9 @@ class Builder:
                                     os.makedirs(args.store + hashDir, exist_ok=True)
                                 if not os.path.isfile(args.store + hashFile):
                                     shutil.copyfile(fname_abs, args.store + hashDir + "/" + hashFile, follow_symlinks=False)
-                                artifacts.append(db.Artifacts(build_id=build.id, hash=hashFile, filename=fname_rel))
+                                artifacts.append(Artifacts(build_id=build.id, hash=hashFile, filename=fname_rel))
                     else:
-                        artifacts.append(db.Artifacts(build_id=build.id, filename=fname_rel,
+                        artifacts.append(Artifacts(build_id=build.id, filename=fname_rel,
                             symlink_target=os.path.join(rdir_rel, os.readlink(fname_abs))))
             self.session.add_all(artifacts)
             self.session.commit()
@@ -222,11 +307,11 @@ def reconcile():
         global allbuilders
         global users
 
-        users = session.query(db.Users).all()
+        users = session.query(Users).all()
 
         newbuilders = {}
         oldbuilders = allbuilders
-        for b in session.query(db.Builders).all():
+        for b in session.query(Builders).all():
             try:
                 newbuilders[b.platform_id].append(Builder(b.name, b.platform_id, b.environment))
             except KeyError:
@@ -273,7 +358,7 @@ class Server(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
 
-            for r in session.query(db.Repositories).filter(db.Repositories.name==post_json['project']['path_with_namespace']).all():
+            for r in session.query(Repositories).filter(Repositories.name==post_json['project']['path_with_namespace']).all():
                 if self.headers['X-Gitlab-Event'] == 'Tag Push Hook' and post_json['event_name'] == 'tag_push' and r.enabled:
                     job = Store(repository_name = r.name, repository_url = post_json['project']['ssh_url'], build_tag=post_json['ref'],
                             repository_id = r.id, repository_type = r.type, emails=[post_json['commits'][0]['author']['email'], 

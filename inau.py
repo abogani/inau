@@ -16,7 +16,6 @@ from werkzeug.exceptions import HTTPException, Unauthorized, Forbidden, Internal
 from smtplib import SMTP
 from email.mime.text import MIMEText
 from flask import Flask, request, make_response, got_request_exception, render_template
-from flask_apscheduler import APScheduler
 from flask_restful import Resource, Api, reqparse, fields, marshal_with
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func
@@ -156,12 +155,6 @@ def authenticate(authtype, request):
         print("LDAP issue: ", e)
         raise Forbidden()
     return username
-
-@v2.representation('text/html')
-def output_html(data, code, headers=None):
-    resp = make_response(render_template('elettra.html', data=data), code)
-    resp.headers.extend(headers or {})
-    return resp
 
 @v2.representation('application/json')
 def output_json(data, code, headers=None):
@@ -983,51 +976,51 @@ class HostHandler(Resource):
         return {}, 204
 
 
-files_fields = { 'filename': fields.String() }
-class FilesHandler(Resource):
-    @marshal_with(files_fields)
-    def get(self, facilityname, hostname):
-        host = Hosts.query.join('facility').\
-                filter(Facilities.name == facilityname,
-                        Hosts.name == hostname).\
-                first_or_404()
-        LatestInstallations = db.session.query(Installations)\
-                .with_entities(Repositories.id, Installations.host_id,\
-                    func.max(Installations.id).label('installation_id'))\
-                .select_from(Installations)\
-                .join(Builds).join(Repositories)\
-                .group_by(Repositories.id, Installations.host_id)\
-                .subquery()
-        retval = []
-        for artifact in Builds.query.join('installations').join('artifacts').\
-                join(LatestInstallations, Installations.id == LatestInstallations.c.installation_id).\
-                with_entities(Artifacts).filter(Installations.host == host).all():
-                    retval.append({ 'filename' : artifact.filename })
-        return retval, 200 if retval else 204
-
-file_fields = { 'filename': fields.String(), 'hash': fields.String() }
-class FileHandler(Resource):
-    @marshal_with(file_fields)
-    def get(self, facilityname, hostname, filename):
-        host = Hosts.query.join('facility').\
-                filter(Facilities.name == facilityname,
-                        Hosts.name == hostname).\
-                first_or_404()
-        LatestInstallations = db.session.query(Installations)\
-                .with_entities(Repositories.id, Installations.host_id,\
-                    func.max(Installations.id).label('installation_id'))\
-                .select_from(Installations)\
-                .join(Builds).join(Repositories)\
-                .group_by(Repositories.id, Installations.host_id)\
-                .subquery()
-        artifact = Builds.query.\
-                join('installations').\
-                join('artifacts').\
-                join(LatestInstallations, Installations.id == LatestInstallations.c.installation_id).\
-                with_entities(Artifacts).\
-                filter(Artifacts.filename == filename, Installations.host == host).\
-                first_or_404()
-        return { 'filename': artifact.filename, 'hash': artifact.hash }
+#files_fields = { 'filename': fields.String() }
+#class FilesHandler(Resource):
+#    @marshal_with(files_fields)
+#    def get(self, facilityname, hostname):
+#        host = Hosts.query.join('facility').\
+#                filter(Facilities.name == facilityname,
+#                        Hosts.name == hostname).\
+#                first_or_404()
+#        LatestInstallations = db.session.query(Installations)\
+#                .with_entities(Repositories.id, Installations.host_id,\
+#                    func.max(Installations.id).label('installation_id'))\
+#                .select_from(Installations)\
+#                .join(Builds).join(Repositories)\
+#                .group_by(Repositories.id, Installations.host_id)\
+#                .subquery()
+#        retval = []
+#        for artifact in Builds.query.join('installations').join('artifacts').\
+#                join(LatestInstallations, Installations.id == LatestInstallations.c.installation_id).\
+#                with_entities(Artifacts).filter(Installations.host == host).all():
+#                    retval.append({ 'filename' : artifact.filename })
+#        return retval, 200 if retval else 204
+#
+#file_fields = { 'filename': fields.String(), 'hash': fields.String() }
+#class FileHandler(Resource):
+#    @marshal_with(file_fields)
+#    def get(self, facilityname, hostname, filename):
+#        host = Hosts.query.join('facility').\
+#                filter(Facilities.name == facilityname,
+#                        Hosts.name == hostname).\
+#                first_or_404()
+#        LatestInstallations = db.session.query(Installations)\
+#                .with_entities(Repositories.id, Installations.host_id,\
+#                    func.max(Installations.id).label('installation_id'))\
+#                .select_from(Installations)\
+#                .join(Builds).join(Repositories)\
+#                .group_by(Repositories.id, Installations.host_id)\
+#                .subquery()
+#        artifact = Builds.query.\
+#                join('installations').\
+#                join('artifacts').\
+#                join(LatestInstallations, Installations.id == LatestInstallations.c.installation_id).\
+#                with_entities(Artifacts).\
+#                filter(Artifacts.filename == filename, Installations.host == host).\
+#                first_or_404()
+#        return { 'filename': artifact.filename, 'hash': artifact.hash }
 
 mode_parser = reqparse.RequestParser()
 mode_parser.add_argument('mode', type=str, default='status', required=False,
@@ -1302,11 +1295,6 @@ if __name__ == '__main__':
     db.app = app
     db.init_app(app)
 
-    # Create and configure APScheduler
-#    sched = APScheduler()
-#    sched.init_app(app)
-#    sched.start()
-
     # Create all DB tables if necessary
     db.create_all()
 
@@ -1344,12 +1332,12 @@ if __name__ == '__main__':
     v2.add_resource(HostHandler, 
             '/cs/facilities/<string:facilityname>/hosts/<string:hostname>',
             '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/')
-    v2.add_resource(FilesHandler, 
-            '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/files',
-            '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/files/')
-    v2.add_resource(FileHandler,
-            '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/files/<string:filename>',
-            '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/files/<string:filename>/')
+#    v2.add_resource(FilesHandler, 
+#            '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/files',
+#            '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/files/')
+#    v2.add_resource(FileHandler,
+#            '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/files/<string:filename>',
+#            '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/files/<string:filename>/')
 
     v2.add_resource(CSInstallationsHandler, '/cs/installations',
             '/cs/installations/', '/cs/facilities/installations',
@@ -1363,7 +1351,6 @@ if __name__ == '__main__':
             '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/installations',
             '/cs/facilities/<string:facilityname>/hosts/<string:hostname>/installations/')
 
-    # Start Flask (reloader is not compatible with APScheduler)
     if args.port != "443":
         app.run(host='0.0.0.0', port=args.port, threaded=True,
                 use_reloader=False, use_debugger=False)
