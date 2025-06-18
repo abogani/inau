@@ -193,7 +193,7 @@ class WebhookResponse(BaseModel):
     build_scheduled: bool = False
 
 # Database configuration
-DATABASE_URL = "postgresql://inau:Inau123@localhost:5432/inau"
+DATABASE_URL = "postgresql://inau:@localhost:5432/inau"
 engine = create_engine(DATABASE_URL, echo=True)
 
 def get_session():
