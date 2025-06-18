@@ -1,8 +1,3 @@
---
--- PostgreSQL schema ottimizzato con tabella temporale per installations
--- Sistema INAU per compilazione e installazione binari
---
-
 -- Assicuriamoci che tutte le tabelle di riferimento esistano prima di creare "installations"
 SET client_min_messages = 'WARNING';
 
