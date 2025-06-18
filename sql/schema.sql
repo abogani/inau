@@ -92,7 +92,7 @@ DROP TABLE IF EXISTS "builds" CASCADE;
 CREATE TABLE "builds" (
   "id" SERIAL,
   "repository_id" INTEGER NOT NULL,
-  "platform_id" INTEGER,
+  "platform_id" INTEGER NOT NULL,
   "tag" VARCHAR(255) NOT NULL,
   "date" TIMESTAMP NOT NULL,
   "status" INTEGER,
@@ -272,7 +272,7 @@ CREATE TABLE "hosts" (
   "id" SERIAL PRIMARY KEY,
   "facility_id" INTEGER NOT NULL,
   "server_id" INTEGER NOT NULL,
-  "platform_id" INTEGER,
+  "platform_id" INTEGER NOT NULL,
   "name" VARCHAR(255) NOT NULL,
   CONSTRAINT "hosts_name_key" UNIQUE ("name"),
   FOREIGN KEY ("facility_id") REFERENCES "facilities" ("id"),

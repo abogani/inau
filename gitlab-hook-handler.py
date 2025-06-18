@@ -75,7 +75,7 @@ class Build(SQLModel, table=True):
     
     id: Optional[int] = Field(default=None, primary_key=True)
     repository_id: int = Field(foreign_key="repositories.id", index=True)
-    platform_id: Optional[int] = Field(foreign_key="platforms.id", index=True, nullable=True)
+    platform_id: int = Field(foreign_key="platforms.id", index=True)  # NOT NULL
     tag: str = Field(max_length=255)
     date: datetime = Field(index=True)
     status: Optional[int] = None
@@ -83,7 +83,7 @@ class Build(SQLModel, table=True):
     
     # Relationships
     repository: Repository = Relationship(back_populates="builds")
-    platform: Optional[Platform] = Relationship(back_populates="builds")
+    platform: Platform = Relationship(back_populates="builds")  # Required relationship
     artifacts: List["Artifact"] = Relationship(back_populates="build")
     installations: List["Installation"] = Relationship(back_populates="build")
 
@@ -127,13 +127,13 @@ class Host(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     facility_id: int = Field(foreign_key="facilities.id", index=True)
     server_id: int = Field(foreign_key="servers.id", index=True)
-    platform_id: Optional[int] = Field(foreign_key="platforms.id", index=True, nullable=True)
+    platform_id: int = Field(foreign_key="platforms.id", index=True)  # NOT NULL
     name: str = Field(max_length=255, unique=True)
     
     # Relationships
     facility: Facility = Relationship(back_populates="hosts")
     server: Server = Relationship(back_populates="hosts")
-    platform: Optional[Platform] = Relationship(back_populates="hosts")
+    platform: Platform = Relationship(back_populates="hosts")  # Required relationship
     installations: List["Installation"] = Relationship(back_populates="host")
 
 class User(SQLModel, table=True):
@@ -285,44 +285,30 @@ async def gitlab_webhook(
         if repository:
             logger.info(f"Repository found: {repository.id} - {repository.name}")
             
-            # Get the platforms related to this repository
-            build_scheduled = False
+            # Since platform_id is now NOT NULL in repository, we can directly use it
+            # Create build entry in database
+            build = create_build(
+                session, 
+                repository.id, 
+                repository.platform_id,  # Always present now
+                tag
+            )
             
-            # If repository and platform are valid, schedule a build
-            if repository.platform_id:
-                # Create build entry in database
-                build = create_build(
-                    session, 
-                    repository.id, 
-                    repository.platform_id, 
-                    tag
-                )
-                
-                # Schedule the actual build task (this would use Celery in a real implementation)
-                background_tasks.add_task(
-                    schedule_build_task,
-                    repository.id,
-                    repository.platform_id,
-                    tag
-                )
-                
-                build_scheduled = True
-                
-                return WebhookResponse(
-                    status="success",
-                    message=f"Repository found and build scheduled for tag {tag}",
-                    repository=repository.model_dump(),
-                    extracted_data=extracted_data,
-                    build_scheduled=build_scheduled
-                )
-            else:
-                return WebhookResponse(
-                    status="error",
-                    message="Repository found but no platform associated",
-                    repository=repository.model_dump(),
-                    extracted_data=extracted_data,
-                    build_scheduled=False
-                )
+            # Schedule the actual build task (this would use Celery in a real implementation)
+            background_tasks.add_task(
+                schedule_build_task,
+                repository.id,
+                repository.platform_id,
+                tag
+            )
+            
+            return WebhookResponse(
+                status="success",
+                message=f"Repository found and build scheduled for tag {tag}",
+                repository=repository.model_dump(),
+                extracted_data=extracted_data,
+                build_scheduled=True
+            )
         else:
             logger.info(f"Repository not found: {extracted_data.path_with_namespace}")
             return WebhookResponse(
