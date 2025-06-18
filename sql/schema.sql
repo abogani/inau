@@ -78,7 +78,7 @@ CREATE TABLE "repositories" (
 );
 CREATE INDEX "repositories_provider_id_idx" ON "repositories" ("provider_id");
 CREATE INDEX "repositories_platform_id_idx" ON "repositories" ("platform_id");
-CREATE INDEX "repositories_platform_name_idx" ON "repositories" ("platform_id", "name");
+CREATE INDEX "repositories_name_idx" ON "repositories" ("name");
 CREATE INDEX "repositories_provider_platform_idx" ON "repositories" ("provider_id", "platform_id");
 COMMENT ON TABLE "repositories" IS 'Repository di codice sorgente da compilare';
 COMMENT ON COLUMN "repositories"."type" IS 'Tipo di repository: 1=Git, 2=SVN, 3=Mercurial';
