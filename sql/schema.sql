@@ -40,6 +40,7 @@ CREATE TABLE "platforms" (
   "id" SERIAL PRIMARY KEY,
   "distribution_id" INTEGER NOT NULL,
   "architecture_id" INTEGER NOT NULL,
+  CONSTRAINT "platforms_distribution_architecture_key" UNIQUE ("distribution_id", "architecture_id"),
   FOREIGN KEY ("distribution_id") REFERENCES "distributions" ("id"),
   FOREIGN KEY ("architecture_id") REFERENCES "architectures" ("id")
 );
