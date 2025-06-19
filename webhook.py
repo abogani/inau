@@ -1,26 +1,62 @@
-from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
-from sqlmodel import Field, SQLModel, Session, create_engine, select, Relationship
-from pydantic import BaseModel
-from typing import Optional, Dict, Any, List
+"""
+INAU Webhook Handler
+Gestisce i webhook da GitLab per trigger di nuove build su tag annotati
+"""
 from datetime import datetime
+from typing import Optional, List
+from pydantic import BaseModel, ConfigDict
+from sqlmodel import Field, SQLModel, Session, create_engine, select, Relationship
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi.responses import JSONResponse
 import logging
+from enum import IntEnum
+import json
 from contextlib import asynccontextmanager
 
-# Configure logging
+# Configurazione logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Database models based on schema.sql
+# Configurazione database
+DATABASE_URL = "postgresql://inau:Inau123@localhost/inau"
+engine = create_engine(DATABASE_URL, echo=False)
+
+# Enum per i tipi
+class RepositoryType(IntEnum):
+    """Tipi di repository supportati"""
+    GITLAB = 1
+    GITHUB = 2
+    BITBUCKET = 3
+
+class BuildStatus(IntEnum):
+    """Stati possibili per una build"""
+    SCHEDULED = 0
+    RUNNING = 1
+    SUCCESS = 2
+    FAILED = 3
+    CANCELLED = 4
+
+class InstallationType(IntEnum):
+    """Tipi di installazione"""
+    PRODUCTION = 1
+    STAGING = 2
+    DEVELOPMENT = 3
+    TEST = 4
+
+# Modelli SQLModel
+
 class Architecture(SQLModel, table=True):
+    """Architetture supportate (es. x86_64, arm64)"""
     __tablename__ = "architectures"
     
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(max_length=255, unique=True)
+    name: str = Field(unique=True, index=True, max_length=255)
     
     # Relationships
     platforms: List["Platform"] = Relationship(back_populates="architecture")
 
 class Distribution(SQLModel, table=True):
+    """Distribuzioni supportate (es. Ubuntu 20.04, CentOS 8)"""
     __tablename__ = "distributions"
     
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -29,8 +65,15 @@ class Distribution(SQLModel, table=True):
     
     # Relationships
     platforms: List["Platform"] = Relationship(back_populates="distribution")
+    
+    class Config:
+        # Unique constraint on (name, version)
+        table_args = (
+            {"unique_together": [("name", "version")]},
+        )
 
 class Platform(SQLModel, table=True):
+    """Piattaforme di build (combinazione di distribuzione + architettura)"""
     __tablename__ = "platforms"
     
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -41,29 +84,30 @@ class Platform(SQLModel, table=True):
     distribution: Distribution = Relationship(back_populates="platforms")
     architecture: Architecture = Relationship(back_populates="platforms")
     repositories: List["Repository"] = Relationship(back_populates="platform")
-    builds: List["Build"] = Relationship(back_populates="platform")
     servers: List["Server"] = Relationship(back_populates="platform")
     hosts: List["Host"] = Relationship(back_populates="platform")
 
 class Provider(SQLModel, table=True):
+    """Provider di repository (es. GitLab, GitHub)"""
     __tablename__ = "providers"
     
     id: Optional[int] = Field(default=None, primary_key=True)
-    url: str = Field(max_length=255, unique=True)
+    url: str = Field(unique=True, index=True, max_length=255)
     
     # Relationships
     repositories: List["Repository"] = Relationship(back_populates="provider")
 
 class Repository(SQLModel, table=True):
+    """Repository da monitorare per le build"""
     __tablename__ = "repositories"
     
     id: Optional[int] = Field(default=None, primary_key=True)
     provider_id: int = Field(foreign_key="providers.id", index=True)
     platform_id: int = Field(foreign_key="platforms.id", index=True)
-    type: int
-    name: str = Field(max_length=255, index=True)
+    type: int = Field(description="Repository type (GitLab, GitHub, etc)")
+    name: str = Field(index=True, max_length=255)
     destination: str = Field(max_length=255)
-    enabled: bool = Field(default=True)
+    enabled: bool = Field(default=True, index=True)
     
     # Relationships
     provider: Provider = Relationship(back_populates="repositories")
@@ -71,36 +115,39 @@ class Repository(SQLModel, table=True):
     builds: List["Build"] = Relationship(back_populates="repository")
 
 class Build(SQLModel, table=True):
+    """Build schedulata o eseguita (tabella partizionata per data)"""
     __tablename__ = "builds"
     
     id: Optional[int] = Field(default=None, primary_key=True)
     repository_id: int = Field(foreign_key="repositories.id", index=True)
-    platform_id: int = Field(foreign_key="platforms.id", index=True)  # NOT NULL
+    platform_id: int = Field(foreign_key="platforms.id", index=True) 
     tag: str = Field(max_length=255)
-    date: datetime = Field(index=True)
-    status: Optional[int] = None
-    output: Optional[str] = None
+    date: datetime = Field(default_factory=datetime.utcnow, index=True)
+    status: int = Field(default=BuildStatus.SCHEDULED, index=True)
+    output: Optional[str] = Field(default=None)
     
     # Relationships
     repository: Repository = Relationship(back_populates="builds")
-    platform: Platform = Relationship(back_populates="builds")  # Required relationship
+    platform: Platform = Relationship()
     artifacts: List["Artifact"] = Relationship(back_populates="build")
     installations: List["Installation"] = Relationship(back_populates="build")
 
 class Artifact(SQLModel, table=True):
+    """Artefatti prodotti da una build (tabella partizionata per build_id)"""
     __tablename__ = "artifacts"
     
     id: Optional[int] = Field(default=None, primary_key=True)
     build_id: int = Field(foreign_key="builds.id", index=True)
-    build_date: datetime
-    hash: Optional[str] = Field(max_length=255, nullable=True, index=True)
+    build_date: datetime = Field()
+    hash: Optional[str] = Field(default=None, max_length=255, index=True)
     filename: str = Field(max_length=255, index=True)
-    symlink_target: Optional[str] = Field(max_length=255, nullable=True)
+    symlink_target: Optional[str] = Field(default=None, max_length=255)
     
     # Relationships
     build: Build = Relationship(back_populates="artifacts")
 
 class Server(SQLModel, table=True):
+    """Server di deployment"""
     __tablename__ = "servers"
     
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -113,34 +160,37 @@ class Server(SQLModel, table=True):
     hosts: List["Host"] = Relationship(back_populates="server")
 
 class Facility(SQLModel, table=True):
+    """Facility/Location dove sono installati gli host"""
     __tablename__ = "facilities"
     
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(max_length=255, unique=True)
+    name: str = Field(unique=True, index=True, max_length=255)
     
     # Relationships
     hosts: List["Host"] = Relationship(back_populates="facility")
 
 class Host(SQLModel, table=True):
+    """Host fisici dove vengono installati i binari"""
     __tablename__ = "hosts"
     
     id: Optional[int] = Field(default=None, primary_key=True)
     facility_id: int = Field(foreign_key="facilities.id", index=True)
     server_id: int = Field(foreign_key="servers.id", index=True)
-    platform_id: int = Field(foreign_key="platforms.id", index=True)  # NOT NULL
-    name: str = Field(max_length=255, unique=True)
+    platform_id: int = Field(foreign_key="platforms.id", index=True)
+    name: str = Field(unique=True, index=True, max_length=255)
     
     # Relationships
     facility: Facility = Relationship(back_populates="hosts")
     server: Server = Relationship(back_populates="hosts")
-    platform: Platform = Relationship(back_populates="hosts")  # Required relationship
+    platform: Platform = Relationship(back_populates="hosts")
     installations: List["Installation"] = Relationship(back_populates="host")
 
 class User(SQLModel, table=True):
+    """Utenti che possono installare"""
     __tablename__ = "users"
     
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(max_length=255, unique=True)
+    name: str = Field(unique=True, index=True, max_length=255)
     admin: bool = Field(default=False)
     notify: bool = Field(default=False)
     
@@ -148,181 +198,238 @@ class User(SQLModel, table=True):
     installations: List["Installation"] = Relationship(back_populates="user")
 
 class Installation(SQLModel, table=True):
+    """Installazioni con supporto temporal (tabella partizionata per valid_from)"""
     __tablename__ = "installations"
     
     id: Optional[int] = Field(default=None, primary_key=True)
     host_id: int = Field(foreign_key="hosts.id", index=True)
     user_id: int = Field(foreign_key="users.id", index=True)
-    build_id: int = Field(index=True)
-    build_date: datetime
-    type: int
+    build_id: int = Field(foreign_key="builds.id", index=True)
+    build_date: datetime = Field()
+    type: int = Field(description="Installation type")
     install_date: datetime = Field(index=True)
-    valid_from: datetime = Field(index=True)
-    valid_to: Optional[datetime] = Field(nullable=True)
+    valid_from: datetime = Field(default_factory=datetime.utcnow, index=True)
+    valid_to: Optional[datetime] = Field(default=None, index=True)
     
     # Relationships
     host: Host = Relationship(back_populates="installations")
     user: User = Relationship(back_populates="installations")
     build: Build = Relationship(back_populates="installations")
 
-# Pydantic models for request/response
+# Modelli Pydantic per i webhook
+
 class GitLabProject(BaseModel):
+    """Progetto GitLab dal webhook"""
+    id: int
+    name: str
+    description: Optional[str]
+    web_url: str
+    git_ssh_url: str
+    git_http_url: str
+    namespace: str
     path_with_namespace: str
+    default_branch: str
     ssh_url: str
+    http_url: str
 
-class GitLabWebhookPayload(BaseModel):
-    ref: str
-    user_username: str
-    user_email: str
-    project: GitLabProject
-
-class ExtractedData(BaseModel):
-    ref: str
-    user_username: str
-    user_email: str
-    path_with_namespace: str
-    ssh_url: str
+class GitLabUser(BaseModel):
+    """Utente GitLab che ha fatto il push"""
+    id: int
+    name: str
+    username: str
     email: str
-    tag: Optional[str] = None
+    avatar: Optional[str]
 
-class WebhookResponse(BaseModel):
-    status: str
+class GitLabCommitAuthor(BaseModel):
+    """Autore del commit"""
+    name: str
+    email: str
+
+class GitLabCommit(BaseModel):
+    """Commit nel push"""
+    id: str
     message: str
-    repository: Optional[Dict[str, Any]] = None
-    extracted_data: ExtractedData
-    build_scheduled: bool = False
+    title: str
+    timestamp: str
+    url: str
+    author: GitLabCommitAuthor
+    added: List[str]
+    modified: List[str]
+    removed: List[str]
 
-# Database configuration
-DATABASE_URL = "postgresql://inau:@localhost:5432/inau"
-engine = create_engine(DATABASE_URL, echo=True)
+class GitLabWebhook(BaseModel):
+    """Payload del webhook GitLab per tag push"""
+    model_config = ConfigDict(extra='allow')
+    
+    object_kind: str
+    event_name: str
+    before: str
+    after: str
+    ref: str
+    checkout_sha: str
+    message: Optional[str]
+    user_id: int
+    user_name: str
+    user_username: str
+    user_email: str
+    user_avatar: Optional[str]
+    project_id: int
+    project: GitLabProject
+    commits: List[GitLabCommit]
+    total_commits_count: int
+    repository: dict
 
+# FastAPI app
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Gestione del ciclo di vita dell'applicazione"""
+    # Startup
+    logger.info("Starting INAU Webhook Handler...")
+    SQLModel.metadata.create_all(engine)
+    yield
+    # Shutdown
+    logger.info("Shutting down INAU Webhook Handler...")
+
+app = FastAPI(
+    title="INAU Webhook Handler", 
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Dependency per ottenere la sessione del database
 def get_session():
     with Session(engine) as session:
         yield session
 
-# Function to add build to database
-def create_build(
-    session: Session,
-    repository_id: int,
-    platform_id: int,
-    tag: str
-):
-    """Create a new build entry in the database"""
-    build = Build(
-        repository_id=repository_id,
-        platform_id=platform_id,
-        tag=tag,
-        date=datetime.now(),
-        status=0  # Assumo 0 = scheduled/pending
-    )
-    session.add(build)
+# Funzioni di utilità
+
+def extract_tag_from_ref(ref: str) -> Optional[str]:
+    """Estrae il nome del tag dal ref GitLab"""
+    if ref.startswith("refs/tags/"):
+        return ref.replace("refs/tags/", "")
+    return None
+
+def find_repository(session: Session, provider: Provider, project_path: str) -> Optional[Repository]:
+    """Trova un repository abilitato per il progetto"""
+    return session.exec(
+        select(Repository).where(
+            Repository.provider_id == provider.id,
+            Repository.name == project_path,
+            Repository.enabled == True
+        )
+    ).first()
+
+def schedule_builds(session: Session, repository: Repository, tag: str, background_tasks: BackgroundTasks):
+    """Schedula le build per tutte le piattaforme abilitate del repository"""
+    # Trova tutte le piattaforme abilitate per questo repository
+    platforms = session.exec(
+        select(Platform).join(Repository).where(
+            Repository.provider_id == repository.provider_id,
+            Repository.name == repository.name,
+            Repository.enabled == True
+        )
+    ).all()
+    
+    builds = []
+    for platform in platforms:
+        # Verifica se esiste già una build per questo tag e piattaforma
+        existing_build = session.exec(
+            select(Build).where(
+                Build.repository_id == repository.id,
+                Build.platform_id == platform.id,
+                Build.tag == tag
+            )
+        ).first()
+        
+        if not existing_build:
+            build = Build(
+                repository_id=repository.id,
+                platform_id=platform.id,
+                tag=tag,
+                status=BuildStatus.SCHEDULED
+            )
+            session.add(build)
+            builds.append(build)
+            
+            # Aggiungi task in background per notificare Celery
+            background_tasks.add_task(notify_celery_worker, build.id)
+    
     session.commit()
-    session.refresh(build)
-    logger.info(f"Build created: {build.id} for repository {repository_id}, tag {tag}")
-    return build
+    return builds
 
-# Function to schedule build task with Celery (placeholder)
-def schedule_build_task(repository_id: int, platform_id: int, tag: str):
-    """Schedule a build task using Celery (this is a placeholder)"""
-    # This would normally call a Celery task
-    # e.g.: build_task.delay(repository_id, platform_id, tag)
-    logger.info(f"Build task scheduled for repository {repository_id}, platform {platform_id}, tag {tag}")
-    return True
+def notify_celery_worker(build_id: int):
+    """Notifica il worker Celery di una nuova build da processare"""
+    # TODO: Implementare la notifica a Celery
+    logger.info(f"Build {build_id} scheduled for processing")
 
-# Lifespan event to create tables
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Tables are already created in the schema.sql, so we don't need to create them here
-    # Only create them if they don't exist in development
-    # SQLModel.metadata.create_all(engine)
-    yield
-
-# Create FastAPI app
-app = FastAPI(lifespan=lifespan)
-
-@app.post("", response_model=WebhookResponse)
-async def gitlab_webhook(
-    webhook_data: GitLabWebhookPayload,
+# Endpoints
+@app.post("/")
+async def handle_gitlab_webhook(
+    webhook: GitLabWebhook,
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_session)
 ):
-    """Handle GitLab webhook POST requests"""
-    
+    """
+    Gestisce i webhook di GitLab per i tag push
+    """
     try:
-        # Extract tag from ref (format: refs/tags/1.0.0)
-        tag = webhook_data.ref.replace("refs/tags/", "") if webhook_data.ref.startswith("refs/tags/") else None
+        # Verifica che sia un tag push
+        if webhook.object_kind != "tag_push":
+            return JSONResponse(
+                status_code=200,
+                content={"message": "Ignored: not a tag push event"}
+            )
         
-        # Extract required fields
-        extracted_data = ExtractedData(
-            ref=webhook_data.ref,
-            user_username=webhook_data.user_username,
-            user_email=webhook_data.user_email,
-            path_with_namespace=webhook_data.project.path_with_namespace,
-            ssh_url=webhook_data.project.ssh_url,
-            email=webhook_data.user_email,
-            tag=tag
-        )
-        
-        # Log extracted data for debugging
-        logger.info(f"Extracted webhook data: {extracted_data.model_dump()}")
-        
-        # Only process tag pushes
+        # Estrai il tag dal ref
+        tag = extract_tag_from_ref(webhook.ref)
         if not tag:
-            return WebhookResponse(
-                status="ignored",
-                message="Not a tag push event",
-                extracted_data=extracted_data,
-                build_scheduled=False
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Invalid tag reference"}
             )
         
-        # Search for repository in database
-        statement = select(Repository).where(
-            Repository.name == extracted_data.path_with_namespace,
-            Repository.enabled == True
+        logger.info(f"Received tag push: {tag} for project {webhook.project.path_with_namespace}")
+        
+        # Estrai l'URL base dal git_http_url
+        base_url = webhook.project.git_http_url.split("/")[0] + "//" + webhook.project.git_http_url.split("/")[2]
+        provider = session.exec(select(Provider).where(Provider.url == base_url)).first()
+        
+        # Trova il repository
+        repository = find_repository(session, provider, webhook.project.path_with_namespace)
+        
+        if not repository:
+            logger.warning(f"Repository {webhook.project.path_with_namespace} not found or not enabled")
+            return JSONResponse(
+                status_code=200,
+                content={"message": f"Repository {webhook.project.path_with_namespace} not configured for builds"}
+            )
+        
+        # Schedula le build per tutte le piattaforme abilitate
+        builds = schedule_builds(session, repository, tag, background_tasks)
+        
+        return JSONResponse(
+            status_code=201,
+            content={
+                "message": f"Scheduled {len(builds)} builds for tag {tag}",
+                "builds": [{"id": b.id, "platform_id": b.platform_id} for b in builds]
+            }
         )
-        repository = session.exec(statement).first()
         
-        if repository:
-            logger.info(f"Repository found: {repository.id} - {repository.name}")
-            
-            # Since platform_id is now NOT NULL in repository, we can directly use it
-            # Create build entry in database
-            build = create_build(
-                session, 
-                repository.id, 
-                repository.platform_id,  # Always present now
-                tag
-            )
-            
-            # Schedule the actual build task (this would use Celery in a real implementation)
-            background_tasks.add_task(
-                schedule_build_task,
-                repository.id,
-                repository.platform_id,
-                tag
-            )
-            
-            return WebhookResponse(
-                status="success",
-                message=f"Repository found and build scheduled for tag {tag}",
-                repository=repository.model_dump(),
-                extracted_data=extracted_data,
-                build_scheduled=True
-            )
-        else:
-            logger.info(f"Repository not found: {extracted_data.path_with_namespace}")
-            return WebhookResponse(
-                status="not_found",
-                message="Repository not found",
-                repository=None,
-                extracted_data=extracted_data,
-                build_scheduled=False
-            )
-            
     except Exception as e:
-        logger.error(f"Error processing webhook: {e}")
+        logger.error(f"Error handling webhook: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+#@app.post("/webhook/github")
+#async def handle_github_webhook(
+#    payload: dict,
+#    background_tasks: BackgroundTasks,
+#    session: Session = Depends(get_session)
+#):
+#    """
+#    Placeholder per gestire webhook di GitHub
+#    """
+#    # TODO: Implementare la gestione dei webhook GitHub
+#    return JSONResponse(
+#        status_code=501,
+#        content={"error": "GitHub webhooks not yet implemented"}
+#    )
