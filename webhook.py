@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict
 from sqlmodel import Field, SQLModel, Session, create_engine, select, Relationship
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import JSONResponse
 import logging
 from enum import IntEnum
@@ -22,12 +22,14 @@ DATABASE_URL = "postgresql://inau:Inau123@localhost/inau"
 engine = create_engine(DATABASE_URL, echo=False)
 
 # Enum per i tipi
+# TODO Controllare
 class RepositoryType(IntEnum):
     """Tipi di repository supportati"""
     GITLAB = 1
     GITHUB = 2
     BITBUCKET = 3
 
+# TODO Controllare
 class BuildStatus(IntEnum):
     """Stati possibili per una build"""
     SCHEDULED = 0
@@ -36,6 +38,7 @@ class BuildStatus(IntEnum):
     FAILED = 3
     CANCELLED = 4
 
+# TODO Controllare
 class InstallationType(IntEnum):
     """Tipi di installazione"""
     PRODUCTION = 1
@@ -46,7 +49,7 @@ class InstallationType(IntEnum):
 # Modelli SQLModel
 
 class Architecture(SQLModel, table=True):
-    """Architetture supportate (es. x86_64, arm64)"""
+    """Architetture supportate"""
     __tablename__ = "architectures"
     
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -56,7 +59,7 @@ class Architecture(SQLModel, table=True):
     platforms: List["Platform"] = Relationship(back_populates="architecture")
 
 class Distribution(SQLModel, table=True):
-    """Distribuzioni supportate (es. Ubuntu 20.04, CentOS 8)"""
+    """Distribuzioni supportate"""
     __tablename__ = "distributions"
     
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -88,7 +91,7 @@ class Platform(SQLModel, table=True):
     hosts: List["Host"] = Relationship(back_populates="platform")
 
 class Provider(SQLModel, table=True):
-    """Provider di repository (es. GitLab, GitHub)"""
+    """Provider di repository"""
     __tablename__ = "providers"
     
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -319,54 +322,11 @@ def find_repository(session: Session, provider: Provider, project_path: str) -> 
         )
     ).first()
 
-def schedule_builds(session: Session, repository: Repository, tag: str, background_tasks: BackgroundTasks):
-    """Schedula le build per tutte le piattaforme abilitate del repository"""
-    # Trova tutte le piattaforme abilitate per questo repository
-    platforms = session.exec(
-        select(Platform).join(Repository).where(
-            Repository.provider_id == repository.provider_id,
-            Repository.name == repository.name,
-            Repository.enabled == True
-        )
-    ).all()
-    
-    builds = []
-    for platform in platforms:
-        # Verifica se esiste già una build per questo tag e piattaforma
-        existing_build = session.exec(
-            select(Build).where(
-                Build.repository_id == repository.id,
-                Build.platform_id == platform.id,
-                Build.tag == tag
-            )
-        ).first()
-        
-        if not existing_build:
-            build = Build(
-                repository_id=repository.id,
-                platform_id=platform.id,
-                tag=tag,
-                status=BuildStatus.SCHEDULED
-            )
-            session.add(build)
-            builds.append(build)
-            
-            # Aggiungi task in background per notificare Celery
-            background_tasks.add_task(notify_celery_worker, build.id)
-    
-    session.commit()
-    return builds
-
-def notify_celery_worker(build_id: int):
-    """Notifica il worker Celery di una nuova build da processare"""
-    # TODO: Implementare la notifica a Celery
-    logger.info(f"Build {build_id} scheduled for processing")
-
+# TODO Verificare con due piattaforme
 # Endpoints
 @app.post("/")
 async def handle_gitlab_webhook(
     webhook: GitLabWebhook,
-    background_tasks: BackgroundTasks,
     session: Session = Depends(get_session)
 ):
     """
@@ -404,9 +364,43 @@ async def handle_gitlab_webhook(
                 content={"message": f"Repository {webhook.project.path_with_namespace} not configured for builds"}
             )
         
-        # Schedula le build per tutte le piattaforme abilitate
-        builds = schedule_builds(session, repository, tag, background_tasks)
+        """Schedula le build per tutte le piattaforme abilitate del repository"""
+        platforms = session.exec(
+            select(Platform).join(Repository).where(
+                Repository.provider_id == repository.provider_id,
+                Repository.name == repository.name,
+                Repository.enabled == True
+            )
+        ).all()
         
+        builds = []
+        for platform in platforms:
+            # Verifica se esiste già una build per questo tag e piattaforma
+            existing_build = session.exec(
+                select(Build).where(
+                    Build.repository_id == repository.id,
+                    Build.platform_id == platform.id,
+                    Build.tag == tag
+                )
+            ).first()
+            
+            if not existing_build:
+                build = Build(
+                    repository_id=repository.id,
+                    platform_id=platform.id,
+                    tag=tag,
+                    status=BuildStatus.SCHEDULED
+                )
+                session.add(build)
+                builds.append(build)
+        
+        session.commit()
+
+        for build in builds:
+            """Notifica il worker Celery di una nuova build da processare"""
+            # TODO: Implementare la notifica a Celery
+            logger.info(f"Build {build.id} scheduled for processing")
+
         return JSONResponse(
             status_code=201,
             content={
@@ -422,7 +416,6 @@ async def handle_gitlab_webhook(
 #@app.post("/webhook/github")
 #async def handle_github_webhook(
 #    payload: dict,
-#    background_tasks: BackgroundTasks,
 #    session: Session = Depends(get_session)
 #):
 #    """
