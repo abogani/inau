@@ -1,3 +1,18 @@
+--
+-- PostgreSQL schema ottimizzato con tabella temporale per installations
+-- Sistema INAU per compilazione e installazione binari
+--
+
+-- PostgreSQL schema per sistema INAU (INstall And Update)
+-- Sistema di Continuous Integration/Deployment per compilazione e installazione automatica di binari
+-- 
+-- Struttura del database:
+-- - Tabelle di riferimento: architectures, distributions, platforms
+-- - Gestione repository: providers, repositories
+-- - Tracking build: builds (partizionata), artifacts (partizionata)
+-- - Infrastruttura: servers, facilities, hosts
+-- - Gestione installazioni: users, installations (temporale e partizionata)
+--
 -- Assicuriamoci che tutte le tabelle di riferimento esistano prima di creare "installations"
 SET client_min_messages = 'WARNING';
 
@@ -57,6 +72,7 @@ COMMENT ON TABLE "providers" IS 'Provider di repository (GitLab, GitHub, etc.)';
 
 --
 -- Table structure for table "repositories"
+-- Mapping tra provider e codice sorgente da compilare
 --
 
 DROP TABLE IF EXISTS "repositories" CASCADE;
@@ -65,7 +81,7 @@ CREATE TABLE "repositories" (
   "provider_id" INTEGER NOT NULL,
   "platform_id" INTEGER NOT NULL,
   "type" INTEGER NOT NULL,
-  "name" VARCHAR(255) NOT NULL,
+  "name" VARCHAR(255) NOT NULL,  -- Path completo del repository (es: cs/ds/fake)
   "destination" VARCHAR(255) NOT NULL,
   "enabled" BOOLEAN NOT NULL DEFAULT TRUE,
   FOREIGN KEY ("provider_id") REFERENCES "providers" ("id"),
@@ -75,12 +91,17 @@ CREATE INDEX "repositories_provider_id_idx" ON "repositories" ("provider_id");
 CREATE INDEX "repositories_platform_id_idx" ON "repositories" ("platform_id");
 CREATE INDEX "repositories_name_idx" ON "repositories" ("name");
 CREATE INDEX "repositories_provider_platform_idx" ON "repositories" ("provider_id", "platform_id");
+CREATE INDEX "repositories_enabled_idx" ON "repositories" ("enabled") WHERE "enabled" = TRUE;
 COMMENT ON TABLE "repositories" IS 'Repository di codice sorgente da compilare';
 COMMENT ON COLUMN "repositories"."type" IS 'Tipo di repository: 1=Git, 2=SVN, 3=Mercurial';
+COMMENT ON COLUMN "repositories"."name" IS 'Path completo del repository nel provider (es: namespace/project)';
 COMMENT ON COLUMN "repositories"."destination" IS 'Path di destinazione per i binari compilati';
+COMMENT ON COLUMN "repositories"."enabled" IS 'Flag per abilitare/disabilitare temporaneamente la compilazione';
 
 --
 -- Table structure for table "builds" (with partitioning)
+-- Tabella per tracciare tutte le build eseguite
+-- Partizionata per mese sulla colonna "date" per ottimizzare performance e manutenzione
 --
 
 DROP TABLE IF EXISTS "builds" CASCADE;
@@ -89,10 +110,10 @@ CREATE TABLE "builds" (
   "repository_id" INTEGER NOT NULL,
   "platform_id" INTEGER NOT NULL,
   "tag" VARCHAR(255) NOT NULL,
-  "date" TIMESTAMP NOT NULL,
-  "status" INTEGER,
+  "date" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "status" INTEGER NOT NULL DEFAULT 0,  -- 0=scheduled
   "output" TEXT,
-  PRIMARY KEY ("id", "date"),
+  PRIMARY KEY ("id", "date"),  -- Chiave composita necessaria per il partizionamento
   FOREIGN KEY ("repository_id") REFERENCES "repositories" ("id"),
   FOREIGN KEY ("platform_id") REFERENCES "platforms" ("id")
 ) PARTITION BY RANGE ("date");
@@ -388,13 +409,16 @@ CREATE TRIGGER create_installations_partition_trigger
 
 -- Funzione per gestire gli aggiornamenti temporali delle installazioni
 -- Quando un record viene aggiornato, questa funzione:
--- 1. Chiude il periodo di validità del record corrente impostando valid_to
+-- 1. Chiude il periodo di validità del record corrente impostando valid_to = NOW()
 -- 2. Crea un nuovo record con i valori aggiornati e valid_from = NOW()
--- Questo mantiene la storia completa delle modifiche
+-- 3. Mantiene la storia completa delle modifiche nel tempo
+-- 
+-- Questo pattern implementa il "Slowly Changing Dimension Type 2" (SCD2)
+-- per mantenere una traccia storica completa di tutte le modifiche
 CREATE OR REPLACE FUNCTION installation_temporal_update()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER AS $
 BEGIN
-  -- Verifica che esista un record attivo
+  -- Verifica che esista un record attivo (valid_to IS NULL indica record corrente)
   IF NOT EXISTS (
     SELECT 1 FROM installations 
     WHERE id = OLD.id AND valid_to IS NULL
@@ -402,12 +426,13 @@ BEGIN
     RAISE EXCEPTION 'Nessun record attivo trovato per installation_id %', OLD.id;
   END IF;
   
-  -- Aggiorna il record esistente chiudendo il periodo di validità
+  -- Chiude il record esistente impostando il timestamp di fine validità
   UPDATE installations 
   SET valid_to = CURRENT_TIMESTAMP
   WHERE id = OLD.id AND valid_to IS NULL;
   
-  -- Inserisci un nuovo record con i valori aggiornati
+  -- Inserisce un nuovo record con i valori aggiornati
+  -- Il nuovo record avrà valid_from = NOW() e valid_to = NULL (record attivo)
   INSERT INTO installations (
     host_id, user_id, build_id, build_date, type, install_date, valid_from, valid_to
   ) VALUES (
@@ -415,9 +440,11 @@ BEGIN
     NEW.install_date, CURRENT_TIMESTAMP, NULL
   );
   
+  -- Ritorna NULL per impedire l'update diretto del record originale
   RETURN NULL;
 END;
-$$ LANGUAGE plpgsql;
+$ LANGUAGE plpgsql;
+COMMENT ON FUNCTION installation_temporal_update IS 'Gestisce gli aggiornamenti temporali implementando SCD Type 2 per mantenere la storia completa';
 
 -- Trigger per gestire gli aggiornamenti temporali
 CREATE TRIGGER installations_temporal_update_trigger
@@ -427,14 +454,19 @@ CREATE TRIGGER installations_temporal_update_trigger
   EXECUTE FUNCTION installation_temporal_update();
 
 -- Vista per ottenere la versione corrente delle installazioni
+-- Filtra solo i record con valid_to = NULL (record attualmente validi)
 CREATE OR REPLACE VIEW current_installations AS
 SELECT id, host_id, user_id, build_id, build_date, type, install_date, valid_from
 FROM installations
 WHERE valid_to IS NULL;
-COMMENT ON VIEW current_installations IS 'Vista delle installazioni attualmente attive (valid_to = NULL)';
+COMMENT ON VIEW current_installations IS 'Vista delle installazioni attualmente attive (valid_to = NULL) - snapshot dello stato corrente';
 
 -- Funzione per recuperare lo stato di un'installazione in un dato momento
-CREATE OR REPLACE FUNCTION get_installation_at_time(installation_id INTEGER, point_in_time TIMESTAMP)
+-- Utile per audit e analisi storiche: "com'era configurato l'host X alla data Y?"
+CREATE OR REPLACE FUNCTION get_installation_at_time(
+  installation_id INTEGER, 
+  point_in_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
 RETURNS TABLE (
   id INTEGER,
   host_id INTEGER,
@@ -445,20 +477,24 @@ RETURNS TABLE (
   install_date TIMESTAMP,
   valid_from TIMESTAMP,
   valid_to TIMESTAMP
-) AS $$
+) AS $
 BEGIN
   RETURN QUERY
-  SELECT *
-  FROM installations
-  WHERE id = installation_id
-  AND (point_in_time >= valid_from)
-  AND (valid_to IS NULL OR point_in_time < valid_to);
+  SELECT i.*
+  FROM installations i
+  WHERE i.id = installation_id
+  AND point_in_time >= i.valid_from
+  AND (i.valid_to IS NULL OR point_in_time < i.valid_to);
 END;
-$$ LANGUAGE plpgsql;
-COMMENT ON FUNCTION get_installation_at_time IS 'Recupera lo stato di un''installazione in un momento specifico nel tempo';
+$ LANGUAGE plpgsql STABLE;
+COMMENT ON FUNCTION get_installation_at_time IS 'Recupera lo stato di un''installazione in un momento specifico nel tempo (time-travel query)';
 
 -- Funzione per recuperare la storia completa di un'installazione
-CREATE OR REPLACE FUNCTION get_installation_history(installation_id INTEGER)
+-- Mostra tutte le modifiche nel tempo ordinate dalla più recente
+CREATE OR REPLACE FUNCTION get_installation_history(
+  installation_id INTEGER,
+  limit_rows INTEGER DEFAULT NULL
+)
 RETURNS TABLE (
   id INTEGER,
   host_id INTEGER,
@@ -468,21 +504,25 @@ RETURNS TABLE (
   type INTEGER,
   install_date TIMESTAMP,
   valid_from TIMESTAMP,
-  valid_to TIMESTAMP
-) AS $$
+  valid_to TIMESTAMP,
+  duration INTERVAL
+) AS $
 BEGIN
   RETURN QUERY
-  SELECT *
-  FROM installations
-  WHERE id = installation_id
-  ORDER BY valid_from DESC;
+  SELECT 
+    i.*,
+    COALESCE(i.valid_to, CURRENT_TIMESTAMP) - i.valid_from AS duration
+  FROM installations i
+  WHERE i.id = installation_id
+  ORDER BY i.valid_from DESC
+  LIMIT limit_rows;
 END;
-$$ LANGUAGE plpgsql;
-COMMENT ON FUNCTION get_installation_history IS 'Recupera la storia completa delle modifiche di un''installazione';
+$ LANGUAGE plpgsql STABLE;
+COMMENT ON FUNCTION get_installation_history IS 'Recupera la storia completa delle modifiche di un''installazione con durata di ogni periodo';
 
 -- Creazione di partizioni iniziali per le tabelle partizionate
 -- Builds: crea partizione per il mese corrente
-DO $$
+DO $
 DECLARE
   current_month DATE := date_trunc('month', CURRENT_DATE);
   next_month DATE := current_month + interval '1 month';
@@ -492,11 +532,12 @@ BEGIN
     EXECUTE format('CREATE TABLE %I PARTITION OF builds
                     FOR VALUES FROM (%L) TO (%L)',
                     partition_name, current_month, next_month);
+    RAISE NOTICE 'Creata partizione iniziale: %', partition_name;
   END IF;
-END $$;
+END $;
 
 -- Artifacts: crea prima partizione
-DO $$
+DO $
 DECLARE
   partition_name TEXT := 'artifacts_0_100000';
 BEGIN
@@ -504,11 +545,12 @@ BEGIN
     EXECUTE format('CREATE TABLE %I PARTITION OF artifacts
                     FOR VALUES FROM (0) TO (100000)',
                     partition_name);
+    RAISE NOTICE 'Creata partizione iniziale: %', partition_name;
   END IF;
-END $$;
+END $;
 
 -- Installations: crea partizione per l'anno corrente
-DO $$
+DO $
 DECLARE
   current_year DATE := date_trunc('year', CURRENT_DATE);
   next_year DATE := current_year + interval '1 year';
@@ -518,5 +560,128 @@ BEGIN
     EXECUTE format('CREATE TABLE %I PARTITION OF installations
                     FOR VALUES FROM (%L) TO (%L)',
                     partition_name, current_year, next_year);
+    RAISE NOTICE 'Creata partizione iniziale: %', partition_name;
   END IF;
-END $$;
+END $;
+
+--
+-- Funzioni di utility aggiuntive per il sistema INAU
+--
+
+-- Funzione per ottenere statistiche sulle build per repository
+CREATE OR REPLACE FUNCTION get_build_stats_by_repository(
+  repo_id INTEGER DEFAULT NULL,
+  start_date TIMESTAMP DEFAULT CURRENT_DATE - INTERVAL '30 days',
+  end_date TIMESTAMP DEFAULT CURRENT_DATE
+)
+RETURNS TABLE (
+  repository_id INTEGER,
+  repository_name VARCHAR(255),
+  total_builds BIGINT,
+  successful_builds BIGINT,
+  failed_builds BIGINT,
+  success_rate NUMERIC(5,2),
+  avg_build_time INTERVAL
+) AS $
+BEGIN
+  RETURN QUERY
+  SELECT 
+    r.id AS repository_id,
+    r.name AS repository_name,
+    COUNT(b.id) AS total_builds,
+    COUNT(b.id) FILTER (WHERE b.status = 2) AS successful_builds,
+    COUNT(b.id) FILTER (WHERE b.status = 3) AS failed_builds,
+    CASE 
+      WHEN COUNT(b.id) > 0 
+      THEN ROUND(100.0 * COUNT(b.id) FILTER (WHERE b.status = 2) / COUNT(b.id), 2)
+      ELSE 0
+    END AS success_rate,
+    NULL::INTERVAL AS avg_build_time  -- Placeholder: richiederebbe campo end_time
+  FROM repositories r
+  LEFT JOIN builds b ON r.id = b.repository_id 
+    AND b.date >= start_date 
+    AND b.date <= end_date
+  WHERE (repo_id IS NULL OR r.id = repo_id)
+  GROUP BY r.id, r.name
+  ORDER BY total_builds DESC;
+END;
+$ LANGUAGE plpgsql STABLE;
+COMMENT ON FUNCTION get_build_stats_by_repository IS 'Statistiche build per repository in un periodo specifico';
+
+-- Funzione per la manutenzione delle partizioni vecchie
+CREATE OR REPLACE FUNCTION drop_old_partitions(
+  table_name TEXT,
+  retention_period INTERVAL DEFAULT '1 year'
+)
+RETURNS TABLE (
+  dropped_partition TEXT,
+  drop_date TIMESTAMP
+) AS $
+DECLARE
+  partition_record RECORD;
+  cutoff_date TIMESTAMP := CURRENT_DATE - retention_period;
+BEGIN
+  -- Solo per tabelle partizionate per data
+  IF table_name NOT IN ('builds', 'installations') THEN
+    RAISE EXCEPTION 'Tabella % non supportata per drop partizioni', table_name;
+  END IF;
+  
+  -- Trova e droppa le partizioni vecchie
+  FOR partition_record IN 
+    SELECT 
+      schemaname,
+      tablename,
+      pg_get_expr(c.relpartbound, c.oid) AS partition_expression
+    FROM pg_tables t
+    JOIN pg_class c ON c.relname = t.tablename
+    WHERE t.tablename LIKE table_name || '_%'
+    AND t.schemaname = 'public'
+  LOOP
+    -- Analizza la partition expression per determinare se è vecchia
+    -- (implementazione semplificata - in produzione servirebbe parsing più robusto)
+    IF partition_record.partition_expression LIKE '%' || to_char(cutoff_date, 'YYYY') || '%' THEN
+      CONTINUE; -- Skip recent partitions
+    END IF;
+    
+    -- Droppa la partizione
+    EXECUTE format('DROP TABLE IF EXISTS %I.%I CASCADE',
+                   partition_record.schemaname,
+                   partition_record.tablename);
+    
+    dropped_partition := partition_record.tablename;
+    drop_date := CURRENT_TIMESTAMP;
+    RETURN NEXT;
+  END LOOP;
+  
+  RETURN;
+END;
+$ LANGUAGE plpgsql;
+COMMENT ON FUNCTION drop_old_partitions IS 'Rimuove partizioni più vecchie del periodo di retention specificato';
+
+-- Indici aggiuntivi per query comuni
+CREATE INDEX IF NOT EXISTS "builds_tag_idx" ON "builds" ("tag");
+CREATE INDEX IF NOT EXISTS "builds_repository_date_idx" ON "builds" ("repository_id", "date" DESC);
+
+-- Funzione per creare un report delle installazioni attive per facility
+CREATE OR REPLACE FUNCTION get_active_installations_by_facility()
+RETURNS TABLE (
+  facility_name VARCHAR(255),
+  host_count BIGINT,
+  installation_count BIGINT,
+  last_installation TIMESTAMP
+) AS $
+BEGIN
+  RETURN QUERY
+  SELECT 
+    f.name AS facility_name,
+    COUNT(DISTINCT h.id) AS host_count,
+    COUNT(DISTINCT i.id) AS installation_count,
+    MAX(i.install_date) AS last_installation
+  FROM facilities f
+  LEFT JOIN hosts h ON f.id = h.facility_id
+  LEFT JOIN current_installations i ON h.id = i.host_id
+  GROUP BY f.id, f.name
+  ORDER BY f.name;
+END;
+$ LANGUAGE plpgsql STABLE;
+COMMENT ON FUNCTION get_active_installations_by_facility IS 'Report delle installazioni attive raggruppate per facility';
