@@ -1,0 +1,16 @@
+Controllare che l'uso delle tabelle sia otimizzato con la creazione idonea di indici
+Se una macchina cambia piattaforma tutte le installazioni vecchie e nuove si commistionano! Supportare l'aggiunta di una macchina con lo stesso nome ma piattaforma diversa e la possibilita' di togliere una macchina da una facility (in questo caso sarebbe quella con la piattaforma vecchia che risulterebbe nella pratica rimpiazzata)
+Non mandare comandi separati ai builder ma tutta la sequenza di build in un sol colpo
+Unificare l'approccio al DB (utile per spezzetare piu facilmente i vari script)
+L.P.: Un'altra cosa utile sarebbe un rest per chiedere tutti i build disponibili (platform e release) per un repo
+L.P.: Un metodo per vedere i tag di un repository
+Aggiungere il supporto alle collisioni (due repository che creano file con lo stesso nome e lo stesso path) check da fare ad installation-time
+Prevedere che i repository possano essere compilati in piu' varianti al momento solo due: debug e release (da riflettere se farlo per repository o per facility nel caso valutare anche la possibilita' di specificare la linea di compilazione in particolare per progetti non fatti da noi)
+Eliminare repositories destination (anche type?) quindi TUTTI i progetti devono prevedere il make install (e INAU deve eseguirlo su una dir temporanea con mktemp)
+Investigare la possibilita' di inviare gli artifacts tutti insieme invece che fare un scp file per file che con tanti file e' molto lento (forse sincronizzare direttamente con rsync?) 
+Rivedere la logica dell'installazione: invece di fallire se manca qualcosa farla procedere sempre riportando quello che e' riuscito a fare
+Implementare la disinstallazione
+Ritornare dalla query su quanto installato quello che c'e' veramente installato (gli hash dei file in /runtime) e non quello che si ritiene lo sia stato (i file dal db che si ritiene installati) questo dovrebbe anche evidenziare eventuali installazioni "manuali"
+Compilazione (come se fosse fatta) in fase di installazione. Il sistema esegue la compilazione appena arriva il tag annotato ma invece di mandare un email al utilizzatore presenta l'output direttamente dal terminale al momento dell'installazione
+Evitare (quando si installa e quando si legge le installazioni) di elencare tutti gli host quando é installata la stessa roba su tutti L.P.: "Una cosa che si potrebbe semplificare (rimuovere) in INAU e' il loop che aggiunge un componente ad ogni host quando lo stesso venga installato nella facility... alla fine e' sufficiente sapere cosa e' installato nella facility o, solo nel caso di installazione locale al''host, nel singolo host". Sara' conveniente mantenere l'approccio attuale nello schema SQL (per macchina) ma sintetizzare l'ouput quando viene presentato all'utente utilizzando le funzioni insiemistiche
+Integrare dei linter (shellcheck per gli script) e uno per Python
