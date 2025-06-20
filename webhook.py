@@ -22,14 +22,14 @@ DATABASE_URL = "postgresql://inau:Inau123@localhost/inau"
 engine = create_engine(DATABASE_URL, echo=False)
 
 # Enum per i tipi
-# TODO Controllare
 class RepositoryType(IntEnum):
     """Tipi di repository supportati"""
-    GITLAB = 1
-    GITHUB = 2
-    BITBUCKET = 3
+    CPLUSPLUS = 0,
+    PYTHON = 1,
+    CONFIGURATION = 2,
+    SHELLSCRIPT = 3,
+    LIBRARY = 4
 
-# TODO Controllare
 class BuildStatus(IntEnum):
     """Stati possibili per una build"""
     SCHEDULED = 0
@@ -38,13 +38,11 @@ class BuildStatus(IntEnum):
     FAILED = 3
     CANCELLED = 4
 
-# TODO Controllare
 class InstallationType(IntEnum):
     """Tipi di installazione"""
-    PRODUCTION = 1
-    STAGING = 2
-    DEVELOPMENT = 3
-    TEST = 4
+    GLOBAL = 0,
+    FACILITY = 1,
+    HOST = 2
 
 # Modelli SQLModel
 
@@ -312,17 +310,6 @@ def extract_tag_from_ref(ref: str) -> Optional[str]:
         return ref.replace("refs/tags/", "")
     return None
 
-def find_repository(session: Session, provider: Provider, project_path: str) -> Optional[Repository]:
-    """Trova un repository abilitato per il progetto"""
-    return session.exec(
-        select(Repository).where(
-            Repository.provider_id == provider.id,
-            Repository.name == project_path,
-            Repository.enabled == True
-        )
-    ).first()
-
-# TODO Verificare con due piattaforme
 # Endpoints
 @app.post("/")
 async def handle_gitlab_webhook(
@@ -350,36 +337,21 @@ async def handle_gitlab_webhook(
         
         logger.info(f"Received tag push: {tag} for project {webhook.project.path_with_namespace}")
         
-        # Estrai l'URL base dal git_http_url
-        base_url = webhook.project.git_http_url.split("/")[0] + "//" + webhook.project.git_http_url.split("/")[2]
-        provider = session.exec(select(Provider).where(Provider.url == base_url)).first()
-        
-        # Trova il repository
-        repository = find_repository(session, provider, webhook.project.path_with_namespace)
-        
-        if not repository:
-            logger.warning(f"Repository {webhook.project.path_with_namespace} not found or not enabled")
-            return JSONResponse(
-                status_code=200,
-                content={"message": f"Repository {webhook.project.path_with_namespace} not configured for builds"}
-            )
-        
-        """Schedula le build per tutte le piattaforme abilitate del repository"""
-        platforms = session.exec(
-            select(Platform).join(Repository).where(
-                Repository.provider_id == repository.provider_id,
-                Repository.name == repository.name,
+        # Trova i repositories
+        repositories = session.exec(
+            select(Repository).where(
+                Repository.name == webhook.project.path_with_namespace,
                 Repository.enabled == True
             )
         ).all()
         
         builds = []
-        for platform in platforms:
+        for repository in repositories:
             # Verifica se esiste già una build per questo tag e piattaforma
             existing_build = session.exec(
                 select(Build).where(
                     Build.repository_id == repository.id,
-                    Build.platform_id == platform.id,
+                    Build.platform_id == repository.platform_id,
                     Build.tag == tag
                 )
             ).first()
@@ -387,7 +359,7 @@ async def handle_gitlab_webhook(
             if not existing_build:
                 build = Build(
                     repository_id=repository.id,
-                    platform_id=platform.id,
+                    platform_id=repository.platform_id,
                     tag=tag,
                     status=BuildStatus.SCHEDULED
                 )
@@ -399,30 +371,13 @@ async def handle_gitlab_webhook(
         for build in builds:
             """Notifica il worker Celery di una nuova build da processare"""
             # TODO: Implementare la notifica a Celery
-            logger.info(f"Build {build.id} scheduled for processing")
+            logger.info(f"Build {build.id} scheduled for processing on platform {build.platform_id}")
 
         return JSONResponse(
             status_code=201,
-            content={
-                "message": f"Scheduled {len(builds)} builds for tag {tag}",
-                "builds": [{"id": b.id, "platform_id": b.platform_id} for b in builds]
-            }
+            content={}
         )
         
     except Exception as e:
         logger.error(f"Error handling webhook: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-
-#@app.post("/webhook/github")
-#async def handle_github_webhook(
-#    payload: dict,
-#    session: Session = Depends(get_session)
-#):
-#    """
-#    Placeholder per gestire webhook di GitHub
-#    """
-#    # TODO: Implementare la gestione dei webhook GitHub
-#    return JSONResponse(
-#        status_code=501,
-#        content={"error": "GitHub webhooks not yet implemented"}
-#    )
