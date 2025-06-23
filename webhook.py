@@ -20,9 +20,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configurazione database
+DATABASE_URL = os.getenv('DATABASE_URL', None)
 engine = create_engine(DATABASE_URL, echo=False)
 
 # Setup Celery
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', None)
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', None)
 celery_app = Celery('inau_webhook', broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)
 
 # Enum per i tipi

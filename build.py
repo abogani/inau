@@ -30,8 +30,8 @@ from webhook import (
 )
 
 # Configurazione Celery
-CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', None)
+CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', None)
 
 # Configurazione paths
 REPO_BASE_DIR = os.getenv('INAU_REPO_DIR', '/scratch/build/repositories')
