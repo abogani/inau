@@ -12,22 +12,26 @@ import logging
 from enum import IntEnum
 import json
 from contextlib import asynccontextmanager
+import os
+from celery import Celery
 
 # Configurazione logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configurazione database
-DATABASE_URL = "postgresql://inau:Inau123@localhost/inau"
 engine = create_engine(DATABASE_URL, echo=False)
+
+# Setup Celery
+celery_app = Celery('inau_webhook', broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)
 
 # Enum per i tipi
 class RepositoryType(IntEnum):
     """Tipi di repository supportati"""
-    CPLUSPLUS = 0,
-    PYTHON = 1,
-    CONFIGURATION = 2,
-    SHELLSCRIPT = 3,
+    CPLUSPLUS = 0
+    PYTHON = 1
+    CONFIGURATION = 2
+    SHELLSCRIPT = 3
     LIBRARY = 4
 
 class BuildStatus(IntEnum):
@@ -40,8 +44,8 @@ class BuildStatus(IntEnum):
 
 class InstallationType(IntEnum):
     """Tipi di installazione"""
-    GLOBAL = 0,
-    FACILITY = 1,
+    GLOBAL = 0
+    FACILITY = 1
     HOST = 2
 
 # Modelli SQLModel
@@ -74,7 +78,7 @@ class Distribution(SQLModel, table=True):
         )
 
 class Platform(SQLModel, table=True):
-    """Piattaforme di build (combinazione di distribuzione + architettura)"""
+    """Piattaforme di build"""
     __tablename__ = "platforms"
     
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -146,6 +150,18 @@ class Artifact(SQLModel, table=True):
     
     # Relationships
     build: Build = Relationship(back_populates="artifacts")
+
+class Builder(SQLModel, table=True):
+    """Builder per compilare su diverse piattaforme"""
+    __tablename__ = "builders"
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    platform_id: int = Field(foreign_key="platforms.id", index=True)
+    name: str = Field(max_length=255)
+    environment: Optional[str] = Field(default=None, max_length=255)
+    
+    # Relationships
+    platform: Platform = Relationship()
 
 class Server(SQLModel, table=True):
     """Server di deployment"""
@@ -310,7 +326,104 @@ def extract_tag_from_ref(ref: str) -> Optional[str]:
         return ref.replace("refs/tags/", "")
     return None
 
+def find_repositories(session: Session, project_path: str) -> List[Repository]:
+    """Trova tutti i repository abilitati per il progetto"""
+    return session.exec(
+        select(Repository).where(
+            Repository.name == project_path,
+            Repository.enabled == True
+        )
+    ).all()
+
+def schedule_builds(
+    session: Session, 
+    repositories: List[Repository], 
+    tag: str, 
+    webhook: GitLabWebhook
+) -> List[Build]:
+    """Schedula le build per tutte le piattaforme abilitate dei repository"""
+    builds = []
+    
+    for repository in repositories:
+        # Verifica se esiste già una build per questo tag e piattaforma
+        existing_build = session.exec(
+            select(Build).where(
+                Build.repository_id == repository.id,
+                Build.platform_id == repository.platform_id,
+                Build.tag == tag
+            )
+        ).first()
+        
+        if not existing_build:
+            build = Build(
+                repository_id=repository.id,
+                platform_id=repository.platform_id,
+                tag=tag,
+                status=BuildStatus.SCHEDULED
+            )
+            session.add(build)
+            session.commit()
+            session.refresh(build)
+            
+            # Prepara i dati per Celery
+            build_task = {
+                "build_id": build.id,
+                "repository_id": repository.id,
+                "platform_id": repository.platform_id,
+                "tag": tag,
+                "repository_name": repository.name,
+                "repository_url": webhook.project.ssh_url,
+                "repository_type": repository.type,
+                "user_email": webhook.commits[0].author.email if webhook.commits else webhook.user_email,
+                "default_branch": webhook.project.default_branch,
+                # Email multiple per compatibilità con vecchio sistema
+                "emails": [
+                    webhook.commits[0].author.email if webhook.commits else None,
+                    f"{webhook.user_username}@elettra.eu",
+                    webhook.user_email
+                ]
+            }
+            
+            # Invia il task a Celery
+            notify_celery_worker(build_task)
+            builds.append(build)
+    
+    return builds
+
+def notify_celery_worker(build_task: dict):
+    """Invia il task di build al worker Celery"""
+    try:
+        # Invia il task usando send_task per evitare import circolari
+        result = celery_app.send_task(
+            'inau.build.process_build',
+            args=[build_task],
+            queue='build_queue'
+        )
+        logger.info(f"Build task sent to Celery: {build_task['build_id']}, task_id: {result.id}")
+    except Exception as e:
+        logger.error(f"Failed to send build task to Celery: {str(e)}")
+
 # Endpoints
+
+    # Check database
+    try:
+        with Session(engine) as session:
+            session.exec(select(1))
+        health["checks"]["database"] = "ok"
+    except Exception as e:
+        health["checks"]["database"] = f"error: {str(e)}"
+        health["status"] = "degraded"
+    
+    # Check Celery broker
+    try:
+        celery_app.control.inspect().stats()
+        health["checks"]["celery_broker"] = "ok"
+    except Exception as e:
+        health["checks"]["celery_broker"] = f"error: {str(e)}"
+        health["status"] = "degraded"
+    
+    return health
+
 @app.post("/")
 async def handle_gitlab_webhook(
     webhook: GitLabWebhook,
@@ -327,6 +440,13 @@ async def handle_gitlab_webhook(
                 content={"message": "Ignored: not a tag push event"}
             )
         
+        # Ignora cancellazione di tag
+        if webhook.after == '0000000000000000000000000000000000000000':
+            return JSONResponse(
+                status_code=200,
+                content={"message": "Ignored: tag deletion"}
+            )
+        
         # Estrai il tag dal ref
         tag = extract_tag_from_ref(webhook.ref)
         if not tag:
@@ -335,47 +455,34 @@ async def handle_gitlab_webhook(
                 content={"error": "Invalid tag reference"}
             )
         
+        # Verifica che non sia un tag lightweight (after == commit id)
+        if webhook.commits and webhook.after == webhook.commits[0].id:
+            return JSONResponse(
+                status_code=200,
+                content={"message": "Ignored: lightweight tag"}
+            )
+        
         logger.info(f"Received tag push: {tag} for project {webhook.project.path_with_namespace}")
         
-        # Trova i repositories
-        repositories = session.exec(
-            select(Repository).where(
-                Repository.name == webhook.project.path_with_namespace,
-                Repository.enabled == True
+        # Trova tutti i repository configurati per questo progetto
+        repositories = find_repositories(session, webhook.project.path_with_namespace)
+        
+        if not repositories:
+            logger.warning(f"Repository {webhook.project.path_with_namespace} not found or not enabled")
+            return JSONResponse(
+                status_code=200,
+                content={"message": f"Repository {webhook.project.path_with_namespace} not configured for builds"}
             )
-        ).all()
         
-        builds = []
-        for repository in repositories:
-            # Verifica se esiste già una build per questo tag e piattaforma
-            existing_build = session.exec(
-                select(Build).where(
-                    Build.repository_id == repository.id,
-                    Build.platform_id == repository.platform_id,
-                    Build.tag == tag
-                )
-            ).first()
-            
-            if not existing_build:
-                build = Build(
-                    repository_id=repository.id,
-                    platform_id=repository.platform_id,
-                    tag=tag,
-                    status=BuildStatus.SCHEDULED
-                )
-                session.add(build)
-                builds.append(build)
+        # Schedula le build per tutte le piattaforme abilitate
+        builds = schedule_builds(session, repositories, tag, webhook)
         
-        session.commit()
-
-        for build in builds:
-            """Notifica il worker Celery di una nuova build da processare"""
-            # TODO: Implementare la notifica a Celery
-            logger.info(f"Build {build.id} scheduled for processing on platform {build.platform_id}")
-
         return JSONResponse(
             status_code=201,
-            content={}
+            content={
+                "message": f"Scheduled {len(builds)} builds for tag {tag}",
+                "builds": [{"id": b.id, "platform_id": b.platform_id} for b in builds]
+            }
         )
         
     except Exception as e:
