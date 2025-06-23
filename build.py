@@ -17,14 +17,14 @@ import json
 
 from celery import Celery, Task
 from celery.utils.log import get_task_logger
-from sqlmodel import Session, select
+from sqlmodel import Session, select, create_engine
 from pydantic import BaseModel
 import paramiko
 import git
 
 # Import dei modelli dal webhook.py
 from webhook import (
-    engine, BuildStatus, RepositoryType, 
+    BuildStatus, RepositoryType, 
     Repository, Build, Artifact, Platform, Builder,
     Distribution, Architecture, User
 )
@@ -48,7 +48,7 @@ SMTP_DOMAIN = os.getenv('SMTP_DOMAIN', 'elettra.eu')
 SMTP_SENDER = os.getenv('SMTP_SENDER', 'noreply')
 
 # Setup Celery
-app = Celery('inau_build', broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)
+app = Celery('inau.build', broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)
 
 # Configurazione Celery
 app.conf.update(
@@ -78,6 +78,7 @@ class BuildTask(BaseModel):
     repository_type: int
     user_email: Optional[str] = None
     default_branch: str = "master"
+    emails: List[str] = []  # FIX: Aggiunto campo mancante
 
 class BuildWorker:
     """Gestisce il processo di build per una piattaforma specifica"""
@@ -291,9 +292,15 @@ class BuildWorker:
                 body += build.output[-5000:]  # Ultimi 5000 caratteri
                 
             # Determina i destinatari
-            recipients = []
-            if task.user_email:
-                recipients.append(task.user_email)
+            recipients = set()
+            
+            # Aggiungi le email dal task
+            for email in task.emails:
+                if email and '@' in email:
+                    recipients.add(email)
+                    
+            if task.user_email and '@' in task.user_email:
+                recipients.add(task.user_email)
                 
             with Session(engine) as session:
                 # Aggiungi utenti con notifiche abilitate
@@ -302,13 +309,13 @@ class BuildWorker:
                 ).all()
                 
                 for user in notifiable_users:
-                    recipients.append(f"{user.name}@{SMTP_DOMAIN}")
+                    recipients.add(f"{user.name}@{SMTP_DOMAIN}")
                     
             if recipients:
                 msg = MIMEText(body)
                 msg['Subject'] = subject
                 msg['From'] = f"{SMTP_SENDER}@{SMTP_DOMAIN}"
-                msg['To'] = ', '.join(set(recipients))
+                msg['To'] = ', '.join(recipients)
                 
                 with SMTP(SMTP_SERVER, 25) as smtp:
                     smtp.send_message(msg)
@@ -354,6 +361,7 @@ def process_build(self: Task, build_data: dict) -> dict:
             session.commit()
             
             # Se la build è riuscita, raccogli gli artifacts
+            artifacts = []
             if exit_status == 0:
                 artifacts = worker.collect_artifacts(task, build, session)
                 logger.info(f"Collected {len(artifacts)} artifacts")
