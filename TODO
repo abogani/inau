@@ -1,5 +1,4 @@
 controllare perchè un nuovo tag su cs/ds/fake genera una sola build quando dovrebbero essere tre
-Chiedere a Claude l'implementazione di restapi.py
 Controllare che l'uso delle tabelle sia otimizzato con la creazione idonea di indici
 Se una macchina cambia piattaforma tutte le installazioni vecchie e nuove si commistionano! Supportare l'aggiunta di una macchina con lo stesso nome ma piattaforma diversa e la possibilita' di togliere una macchina da una facility (in questo caso sarebbe quella con la piattaforma vecchia che risulterebbe nella pratica rimpiazzata)
 Non mandare comandi separati ai builder ma tutta la sequenza di build in un sol colpo
