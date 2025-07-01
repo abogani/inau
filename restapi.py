@@ -13,18 +13,18 @@ from enum import IntEnum
 
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
-from sqlmodel import Session, create_engine, select, func, and_, or_
+from sqlmodel import Session, create_engine, select, func, and_, or_, SQLModel, selectinload
 from pydantic import BaseModel, Field, validator
 import paramiko
 import ldap
 from smtplib import SMTP
 from email.mime.text import MIMEText
 
-# Import dei modelli dal webhook.py
-from webhook import (
-    SQLModel, Architecture, Distribution, Platform, Provider, Repository,
+# Import dei modelli dal models.py
+from models import (
+    Architecture, Distribution, Platform, Provider, Repository,
     Build, Artifact, Builder, Server, Facility, Host, User, Installation,
-    RepositoryType, BuildStatus, InstallationType
+    RepositoryType, BuildStatus, InstallationType, AuthenticationType
 )
 
 # Configurazione
@@ -42,11 +42,6 @@ engine = create_engine(DATABASE_URL, echo=False)
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Enum per tipi di autenticazione
-class AuthenticationType(IntEnum):
-    USER = 0
-    ADMIN = 1
 
 # Modelli Pydantic per le richieste/risposte
 

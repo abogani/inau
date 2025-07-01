@@ -22,8 +22,8 @@ from pydantic import BaseModel
 import paramiko
 import git
 
-# Import dei modelli dal webhook.py
-from webhook import (
+# Import dei modelli dal models.py
+from models import (
     BuildStatus, RepositoryType, 
     Repository, Build, Artifact, Platform, Builder,
     Distribution, Architecture, User
@@ -78,7 +78,7 @@ class BuildTask(BaseModel):
     repository_type: int
     user_email: Optional[str] = None
     default_branch: str = "master"
-    emails: List[str] = []  # FIX: Aggiunto campo mancante
+    emails: List[str] = []
 
 class BuildWorker:
     """Gestisce il processo di build per una piattaforma specifica"""
