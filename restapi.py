@@ -28,13 +28,13 @@ from models import (
 )
 
 # Configurazione
-DATABASE_URL = os.getenv('DATABASE_URL')
-LDAP_URL = os.getenv('LDAP_URL', 'ldaps://abook.elettra.eu:636')
-SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.elettra.eu')
-SMTP_DOMAIN = os.getenv('SMTP_DOMAIN', 'elettra.eu')
-SMTP_SENDER = os.getenv('SMTP_SENDER', 'noreply')
-STORE_DIR = os.getenv('INAU_STORE_DIR', '/scratch/build/files-store')
-REPO_DIR = os.getenv('INAU_REPO_DIR', '/scratch/build/repositories')
+DATABASE_URL = os.getenv('DATABASE_URL', None)
+LDAP_URL = os.getenv('LDAP_URL', None)
+SMTP_SERVER = os.getenv('SMTP_SERVER', None)
+SMTP_DOMAIN = os.getenv('SMTP_DOMAIN', None)
+SMTP_SENDER = os.getenv('SMTP_SENDER', None)
+REPO_DIR = os.getenv('INAU_REPO_DIR', None)
+STORE_DIR = os.getenv('INAU_STORE_DIR', None)
 
 # Setup database
 engine = create_engine(DATABASE_URL, echo=False)

@@ -38,14 +38,14 @@ CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', None)
 CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', None)
 
 # Configurazione paths
-REPO_BASE_DIR = os.getenv('INAU_REPO_DIR', '/scratch/build/repositories')
-STORE_BASE_DIR = os.getenv('INAU_STORE_DIR', '/scratch/build/files-store')
-BUILD_TIMEOUT = int(os.getenv('INAU_BUILD_TIMEOUT', '3600'))  # 1 ora default
+REPO_BASE_DIR = os.getenv('INAU_REPO_DIR', None)
+STORE_BASE_DIR = os.getenv('INAU_STORE_DIR', None)
+BUILD_TIMEOUT = int(os.getenv('INAU_BUILD_TIMEOUT', 3600))
 
 # Configurazione email
-SMTP_SERVER = os.getenv('SMTP_SERVER', 'smtp.elettra.eu')
-SMTP_DOMAIN = os.getenv('SMTP_DOMAIN', 'elettra.eu')
-SMTP_SENDER = os.getenv('SMTP_SENDER', 'noreply')
+SMTP_SERVER = os.getenv('SMTP_SERVER', None)
+SMTP_DOMAIN = os.getenv('SMTP_DOMAIN', None)
+SMTP_SENDER = os.getenv('SMTP_SENDER', None)
 
 # Setup Celery
 app = Celery('inau.build', broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)
