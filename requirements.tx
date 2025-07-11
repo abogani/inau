@@ -13,3 +13,5 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-ldap==3.4.3
 flower==2.0.1
+psutil==5.9.8
+kombu==5.3.4

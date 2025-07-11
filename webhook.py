@@ -136,6 +136,10 @@ def find_repositories(session: Session, project_path: str) -> List[Repository]:
         )
     ).all()
 
+def get_platform_queue_name(platform_id: int) -> str:
+    """Genera il nome della coda per una specifica piattaforma"""
+    return f"build_queue_platform_{platform_id}"
+
 def schedule_builds(
     session: Session, 
     repositories: List[Repository], 
@@ -144,6 +148,7 @@ def schedule_builds(
 ) -> List[Build]:
     """Schedula le build per tutte le piattaforme abilitate dei repository"""
     builds = []
+    builds_by_platform = {}  # Raggruppa build per piattaforma
     
     for repository in repositories:
         # Verifica se esiste già una build per questo tag e piattaforma
@@ -185,22 +190,31 @@ def schedule_builds(
                 ]
             }
             
-            # Invia il task a Celery
-            notify_celery_worker(build_task)
+            # Raggruppa per piattaforma
+            if repository.platform_id not in builds_by_platform:
+                builds_by_platform[repository.platform_id] = []
+            builds_by_platform[repository.platform_id].append(build_task)
             builds.append(build)
+    
+    # Invia i task alle code appropriate per piattaforma
+    for platform_id, platform_builds in builds_by_platform.items():
+        for build_task in platform_builds:
+            notify_celery_worker(build_task, platform_id)
     
     return builds
 
-def notify_celery_worker(build_task: dict):
-    """Invia il task di build al worker Celery"""
+def notify_celery_worker(build_task: dict, platform_id: int):
+    """Invia il task di build al worker Celery sulla coda specifica per piattaforma"""
     try:
+        queue_name = get_platform_queue_name(platform_id)
+        
         # Invia il task usando send_task per evitare import circolari
         result = celery_app.send_task(
             'inau.build.process_build',
             args=[build_task],
-            queue='build_queue'
+            queue=queue_name  # Usa la coda specifica per piattaforma
         )
-        logger.info(f"Build task sent to Celery: {build_task['build_id']}, task_id: {result.id}")
+        logger.info(f"Build task sent to Celery queue '{queue_name}': build_id={build_task['build_id']}, task_id={result.id}")
     except Exception as e:
         logger.error(f"Failed to send build task to Celery: {str(e)}")
 
@@ -287,14 +301,41 @@ async def handle_gitlab_webhook(
         # Schedula le build per tutte le piattaforme abilitate
         builds = schedule_builds(session, repositories, tag, webhook)
         
+        # Raggruppa builds per piattaforma per la risposta
+        builds_by_platform = {}
+        for b in builds:
+            if b.platform_id not in builds_by_platform:
+                builds_by_platform[b.platform_id] = []
+            builds_by_platform[b.platform_id].append({"id": b.id})
+        
         return JSONResponse(
             status_code=201,
             content={
                 "message": f"Scheduled {len(builds)} builds for tag {tag}",
-                "builds": [{"id": b.id, "platform_id": b.platform_id} for b in builds]
+                "builds_by_platform": builds_by_platform
             }
         )
         
     except Exception as e:
         logger.error(f"Error handling webhook: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/queues")
+async def get_active_queues(session: Session = Depends(get_session)):
+    """
+    Endpoint di utilità per visualizzare le code attive per piattaforma
+    """
+    platforms = session.exec(select(Platform)).all()
+    
+    queues = []
+    for platform in platforms:
+        queue_name = get_platform_queue_name(platform.id)
+        queues.append({
+            "platform_id": platform.id,
+            "queue_name": queue_name,
+            "distribution": platform.distribution.name if platform.distribution else "Unknown",
+            "version": platform.distribution.version if platform.distribution else "Unknown",
+            "architecture": platform.architecture.name if platform.architecture else "Unknown"
+        })
+    
+    return {"queues": queues}
